@@ -41,6 +41,13 @@ export function factoryServiceProvider(
   }
 }
 
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 1000;
+
+async function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function apiGet<T>(
   url: string,
   params: Record<string, string | number> = {},
@@ -49,17 +56,37 @@ export async function apiGet<T>(
   const apiURL = new URL(url);
   appendQueryParams(apiURL, params);
 
-  const res = await requestUrl({
-    url: apiURL.href,
-    method: "GET",
-    headers: {
-      Accept: "*/*",
-      "Content-Type": "application/json; charset=utf-8",
-      ...headers,
-    },
-  });
+  let lastError: unknown;
 
-  return res.json as T;
+  for (let i = 0; i <= MAX_RETRIES; i++) {
+    try {
+      const res = await requestUrl({
+        url: apiURL.href,
+        method: "GET",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+          "X-goog-api-key": (params["key"] || "").toString(),
+          Accept: "application/json",
+          "Content-Type": "application/json; charset=utf-8",
+          ...headers,
+        },
+      });
+
+      return res.json as T;
+    } catch (error: unknown) {
+      lastError = error;
+      const err = error as { status?: number; message?: string };
+      if (err.status === 429 && i < MAX_RETRIES) {
+        await delay(RETRY_DELAY * (i + 1));
+        continue;
+      }
+      if (i === MAX_RETRIES) break;
+      await delay(RETRY_DELAY * (i + 1));
+    }
+  }
+
+  throw lastError;
 }
 
 function appendQueryParams(

@@ -17,6 +17,16 @@ interface OpenLibraryDoc {
   original_title?: string;
 }
 
+interface OpenLibraryEdition {
+  isbn_10?: string[];
+  isbn_13?: string[];
+  isbn?: string[];
+  number_of_pages?: number;
+  publish_date?: string;
+  publishers?: string[];
+  description?: string | { value: string };
+}
+
 export class OpenLibraryApi implements BaseBooksApiImpl {
   async getByQuery(query: string): Promise<Book[]> {
     try {
@@ -49,10 +59,98 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
     }
   }
 
-  getBook(book: Book): Promise<Book> {
-    // OpenLibrary search results usually contain enough info, but we can implement specific fetch if needed
-    // For now, return the book as is from search result, effectively relying on mapResultToBook
-    return Promise.resolve(book);
+  async getBook(book: Book): Promise<Book> {
+    try {
+      if (!book.link) return book;
+
+      // Extract the key from the link (e.g., /works/OL40456409W)
+      const keyMatch = book.link.match(/\/(works|books|editions)\/OL\w+/);
+      if (!keyMatch) return book;
+
+      const key = keyMatch[0];
+
+      if (key.startsWith("/works/")) {
+        // Fetch editions of this work to get ISBN and pages
+        const editionsUrl = `https://openlibrary.org${key}/editions.json?limit=5`;
+        const editionsRes = await requestUrl({
+          url: editionsUrl,
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
+
+        if (editionsRes.status === 200 && editionsRes.json.entries) {
+          const entries = editionsRes.json.entries;
+          // Find an edition with ISBN or pages
+          const bestEdition =
+            entries.find(
+              (e: OpenLibraryEdition) =>
+                (e.isbn_10 || e.isbn_13 || e.isbn) && e.number_of_pages,
+            ) ||
+            entries.find(
+              (e: OpenLibraryEdition) => e.isbn_10 || e.isbn_13 || e.isbn,
+            ) ||
+            entries[0];
+
+          if (bestEdition) {
+            // Update book with edition info
+            book.isbn10 =
+              bestEdition.isbn_10?.[0] ||
+              (Array.isArray(bestEdition.isbn)
+                ? bestEdition.isbn.find((id: string) => id.length === 10)
+                : "") ||
+              book.isbn10;
+            book.isbn13 =
+              bestEdition.isbn_13?.[0] ||
+              (Array.isArray(bestEdition.isbn)
+                ? bestEdition.isbn.find((id: string) => id.length === 13)
+                : "") ||
+              book.isbn13;
+            book.totalPage = bestEdition.number_of_pages || book.totalPage;
+            if (bestEdition.publish_date) {
+              book.publishDate = bestEdition.publish_date;
+            }
+            if (bestEdition.publishers && bestEdition.publishers.length > 0) {
+              book.publisher = bestEdition.publishers[0];
+            }
+            // Sometimes description is only in editions
+            if (!book.description && bestEdition.description) {
+              book.description =
+                typeof bestEdition.description === "string"
+                  ? bestEdition.description
+                  : bestEdition.description.value || "";
+            }
+          }
+        }
+      } else {
+        // Fetch specific book/edition detail
+        const detailUrl = `https://openlibrary.org${key}.json`;
+        const detailRes = await requestUrl({
+          url: detailUrl,
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
+
+        if (detailRes.status === 200) {
+          const detail = detailRes.json;
+          book.isbn10 = detail.isbn_10?.[0] || book.isbn10;
+          book.isbn13 = detail.isbn_13?.[0] || book.isbn13;
+          book.totalPage = detail.number_of_pages || book.totalPage;
+          if (detail.publish_date) book.publishDate = detail.publish_date;
+          if (detail.publishers?.[0]) book.publisher = detail.publishers[0];
+          if (!book.description && detail.description) {
+            book.description =
+              typeof detail.description === "string"
+                ? detail.description
+                : detail.description.value || "";
+          }
+        }
+      }
+
+      return book;
+    } catch (error) {
+      console.warn("OpenLibrary enrichment error", error);
+      return book;
+    }
   }
 
   private mapResultToBook(doc: OpenLibraryDoc): Book {
@@ -108,7 +206,7 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
       link,
       previewLink: link,
       description: "", // Search API doesn't always return full description
-      categories: doc.subject || [],
+      categories: doc.subject?.join(", ") || "",
       category: doc.subject ? doc.subject[0] : "",
       asin: "", // OpenLibrary doesn't use ASIN usually
       originalTitle: doc.original_title || "",

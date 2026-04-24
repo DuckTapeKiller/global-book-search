@@ -26,13 +26,14 @@ export class BookSearchModal extends Modal {
   constructor(
     private plugin: BookSearchPlugin,
     private query: string,
+    private serviceProviderId: string | undefined,
     private callback: (error: Error | null, result?: Book[]) => void,
   ) {
     super(plugin.app);
     this.options = { locale: plugin.settings.localePreference };
     this.serviceProvider = factoryServiceProvider(
       plugin.settings,
-      plugin.serviceProviderOverride,
+      serviceProviderId,
     );
   }
 
@@ -75,8 +76,7 @@ export class BookSearchModal extends Modal {
     const { contentEl } = this;
     this.modalEl.addClass("book-search-input-modal");
     const service =
-      this.plugin.serviceProviderOverride ||
-      this.plugin.settings.serviceProvider;
+      this.serviceProviderId || this.plugin.settings.serviceProvider;
 
     // Title
     const titleContainer = contentEl.createDiv({
@@ -180,4 +180,3 @@ export class BookSearchModal extends Modal {
     }
   }
 }
-

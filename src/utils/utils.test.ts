@@ -8,6 +8,8 @@ describe("util.js", () => {
     title: "코스모스",
     author: "칼 세이건",
     authors: ["칼 세이건"],
+    coverUrl: "http://example.com/cover.jpg",
+    link: "http://example.com/book",
   };
 
   it("replaceIllegalFileNameCharactersInString 1", () => {

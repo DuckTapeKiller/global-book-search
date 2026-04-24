@@ -40,51 +40,34 @@ export function applyDefaultFrontMatter(
   frontmatter: FrontMatter | string,
   keyType: DefaultFrontmatterKeyType = DefaultFrontmatterKeyType.snakeCase,
 ) {
-  const frontMater =
-    keyType === DefaultFrontmatterKeyType.camelCase
-      ? book
-      : changeSnakeCase(book);
-
   const extraFrontMatter =
     typeof frontmatter === "string"
       ? parseFrontMatter(frontmatter)
       : frontmatter;
-  for (const key in extraFrontMatter) {
-    const value = extraFrontMatter[key]?.toString().trim() ?? "";
 
-    // logic to prevent overwriting existing data with empty strings from default template
-    if (value === "") {
-      if (
-        frontMater[key] !== undefined &&
-        frontMater[key] !== null &&
-        frontMater[key] !== ""
-      ) {
-        // keep existing value
-        continue;
-      }
-    }
+  const bookData =
+    keyType === DefaultFrontmatterKeyType.camelCase
+      ? book
+      : (changeSnakeCase(book) as Record<string, unknown>);
 
-    if (frontMater[key] && frontMater[key] !== value) {
-      if (Array.isArray(frontMater[key])) {
-        // if array, and we have a new value, we might want to append or ignore.
-        // But since value is string, we typically don't merge string into array unless specific logic.
-        // For now, if user provides string for array field, we ignore if empty, or replace if not empty (risky but standard behavior)
-        // But we already continued if value is empty.
-        if (value) {
-          // Trying to append string to array? Or replace?
-          // Standard behavior was appending string with comma.
-          // Let's stick to avoiding mangling if value is present.
-          frontMater[key] = `${frontMater[key]}, ${value}`;
-        }
-      } else {
-        frontMater[key] = `${frontMater[key]}, ${value}`;
-      }
-    } else {
-      frontMater[key] = value;
+  const result = { ...extraFrontMatter };
+
+  // Add book data only if it doesn't exist in extraFrontMatter (case-insensitive check)
+  const existingKeys = new Set(Object.keys(result).map((k) => k.toLowerCase()));
+
+  for (const key in bookData) {
+    const value = bookData[key];
+    if (
+      !existingKeys.has(key.toLowerCase()) &&
+      value !== undefined &&
+      value !== null &&
+      value !== ""
+    ) {
+      result[key] = value;
     }
   }
 
-  return frontMater as object;
+  return result;
 }
 
 export function replaceVariableSyntax(book: Book, text: string): string {
@@ -97,28 +80,16 @@ export function replaceVariableSyntax(book: Book, text: string): string {
   return entries
     .reduce((result, [key, val = ""]) => {
       if (Array.isArray(val)) {
-        const listString = val.map((v) => `\n  - ${v}`).join("");
         // Check if the variable is wrapped in quotes in the template: "{{key}}"
-        const quotedRegex = new RegExp(`['"]{{${key}}}['"]`, "ig");
+        const quotedRegex = new RegExp(`(['"]){{${key}}}(['"])`, "ig");
         if (quotedRegex.test(result)) {
-          // Replace the entire quoted string with the list string (unquoted)
-          // We need to return result with the REPLACED content.
-          // BUT we are doing this in a reduce, so we must operate on 'result'.
-          return result.replace(quotedRegex, listString);
+          const commaString = val.map((v) => v.trim()).join(", ");
+          return result.replace(quotedRegex, `$1${commaString}$2`);
         }
-
+        const listString = val.map((v) => `\n  - ${v}`).join("");
         return result.replace(new RegExp(`{{${key}}}`, "ig"), listString);
       }
-      let stringVal = String(val); // Safely convert numbers/nulls to string
-      if (stringVal.includes('"')) {
-        let isOpening = true;
-        stringVal = stringVal.replace(/"/g, () => {
-          const char = isOpening ? "«" : "»";
-          isOpening = !isOpening;
-          return char;
-        });
-      }
-      return result.replace(new RegExp(`{{${key}}}`, "ig"), stringVal);
+      return result.replace(new RegExp(`{{${key}}}`, "ig"), String(val));
     }, text)
     .replace(/{{\w+}}/gi, "")
     .trim();
@@ -132,6 +103,7 @@ export function parseFrontMatter(frontMatterString: string) {
   if (!frontMatterString) return {};
   return frontMatterString
     .split("\n")
+    .filter((line) => line.trim() !== "" && line.trim() !== "---")
     .map((item) => {
       const index = item.indexOf(":");
       if (index === -1) return [item.trim(), ""];
@@ -151,23 +123,82 @@ export function parseFrontMatter(frontMatterString: string) {
 export function toStringFrontMatter(frontMatter: object): string {
   return Object.entries(frontMatter)
     .map(([key, newValue]) => {
+      const isDescriptionKey =
+        key.toLowerCase() === "description" ||
+        key.toLowerCase() === "resumen" ||
+        key.toLowerCase() === "summary";
+
       if (Array.isArray(newValue)) {
         if (newValue.length === 0) return "";
         const listValues = newValue.map((v) => `  - ${v}`).join("\n");
         return `${key}:\n${listValues}\n`;
       }
 
-      const stringValue = newValue?.toString().trim() ?? "";
+      let stringValue = newValue?.toString().trim() ?? "";
+      if (stringValue === "" || stringValue === '""') {
+        return `${key}: ""\n`;
+      }
+
+      if (isDescriptionKey) {
+        // Strip leading/trailing quotes if they exist to avoid double quoting
+        stringValue = stringValue.replace(/^"|"$/g, "");
+        let isOpening = true;
+        const hasDoubleQuotes = stringValue.includes('"');
+
+        const escapedValue = stringValue.replace(
+          /"|'/gu,
+          (match, offset, fullText) => {
+            if (match === '"') {
+              const char = isOpening ? "«" : "»";
+              isOpening = !isOpening;
+              return char;
+            }
+
+            // Stateful Single Quote Logic
+            const prev = offset > 0 ? fullText[offset - 1] : "";
+            const next =
+              offset < fullText.length - 1 ? fullText[offset + 1] : "";
+
+            const isLetterBefore = /\p{L}/u.test(prev);
+            const isLetterAfter = /\p{L}/u.test(next);
+
+            // 1. Protect apostrophes (don't, it's)
+            if (isLetterBefore && isLetterAfter) {
+              return "'";
+            }
+
+            // 2. Protect plural possessives (users')
+            if (
+              prev.toLowerCase() === "s" &&
+              (!next || /[\s\p{P}]/u.test(next))
+            ) {
+              return "'";
+            }
+
+            // 3. Nesting-Aware Logic:
+            // If double quotes are present, we treat them as the primary level (replaced with «»)
+            // and leave single quotes as the secondary level (kept as ').
+            // We ONLY replace single quotes if there are NO double quotes in the text.
+            if (hasDoubleQuotes) {
+              return "'";
+            }
+
+            const char = isOpening ? "«" : "»";
+            isOpening = !isOpening;
+            return char;
+          },
+        );
+        return `${key}: "${escapedValue}"\n`;
+      }
+
       if (/\r|\n/.test(stringValue)) {
         return "";
       }
+
       if (/:\s/.test(stringValue) || /"/.test(stringValue)) {
-        let isOpening = true;
-        const escapedValue = stringValue.replace(/"/g, () => {
-          const char = isOpening ? "«" : "»";
-          isOpening = !isOpening;
-          return char;
-        });
+        // Standard YAML escaping for other fields, but strip outer quotes if present
+        const cleanValue = stringValue.replace(/^"|"$/g, "");
+        const escapedValue = cleanValue.replace(/"/g, '\\"');
         return `${key}: "${escapedValue}"\n`;
       }
       return `${key}: ${stringValue}\n`;

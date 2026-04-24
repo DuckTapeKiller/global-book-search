@@ -12,7 +12,7 @@ export class CalibreApi implements BaseBooksApiImpl {
   constructor(
     private readonly serverUrl: string,
     private readonly libraryId: string = "calibre",
-  ) { }
+  ) {}
 
   async getByQuery(query: string): Promise<Book[]> {
     try {
@@ -101,7 +101,9 @@ export class CalibreApi implements BaseBooksApiImpl {
   /**
    * Get items for a specific category (tags, series, authors)
    */
-  private async getCategoryItems(category: string): Promise<Array<{ name: string; count?: number }>> {
+  private async getCategoryItems(
+    category: string,
+  ): Promise<Array<{ name: string; count?: number }>> {
     try {
       const validLibraryId = this.libraryId || "calibre";
       const url = `${this.serverUrl}/ajax/category/${category}/${validLibraryId}`;
@@ -155,6 +157,11 @@ export class CalibreApi implements BaseBooksApiImpl {
    */
   async getBooksBySeries(seriesName: string): Promise<Book[]> {
     return this.getBooksByFilter("series", seriesName);
+  }
+
+  async getBook(book: Book): Promise<Book> {
+    if (!book.sourceId) return book;
+    return this.getBookDetails(book.sourceId);
   }
 
   private async getBookDetails(id: string): Promise<Book> {
@@ -231,7 +238,10 @@ export class CalibreApi implements BaseBooksApiImpl {
       series = seriesInfo;
       seriesLink = `[[${seriesInfo}]]`;
       if (seriesIndex !== null && seriesIndex !== undefined) {
-        seriesNumber = typeof seriesIndex === "number" ? seriesIndex : parseFloat(seriesIndex);
+        seriesNumber =
+          typeof seriesIndex === "number"
+            ? seriesIndex
+            : parseFloat(seriesIndex);
       }
     }
 
@@ -252,7 +262,7 @@ export class CalibreApi implements BaseBooksApiImpl {
       author,
       authors,
       category: "",
-      categories: data.tags || [],
+      categories: (data.tags || []).join(", "),
       publisher,
       publishDate: publishedYear,
       totalPage: "",
@@ -261,8 +271,8 @@ export class CalibreApi implements BaseBooksApiImpl {
       description,
       link: bookUrl,
       previewLink: bookUrl,
-      isbn10: "",
-      isbn13: isbn,
+      isbn10: isbn.length === 10 ? isbn : "",
+      isbn13: isbn.length === 13 ? isbn : "",
       ids: ids,
       originalTitle: "",
       translator: "",
@@ -277,4 +287,3 @@ export class CalibreApi implements BaseBooksApiImpl {
     };
   }
 }
-

@@ -1,5 +1,5 @@
 import { replaceDateInString } from "@utils/utils";
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Menu, Notice, PluginSettingTab, Setting } from "obsidian";
 
 import { ServiceProvider } from "@src/constants";
 import languages from "@utils/languages";
@@ -44,40 +44,242 @@ export interface BookSearchPluginSettings {
   showTemplatePreview: boolean; // Preview note before creation
 }
 
-export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
-  folder: "",
-  fileNameFormat: "",
-  frontmatter: `---
-Título: "{{title}}"
-Título original: "{{originalTitle}}"
-Autor (a): "{{author}}"
-Traductor (a):
-Prólogo:
+export const FRONTMATTER_TEMPLATES = {
+  Spanish: `---
+Título: {{title}}
+Título original: {{originalTitle}}
+Autor: {{author}}
+Traductor: {{translator}}
+Prólogo: ""
 Resumen: "{{description}}"
-Páginas: "{{totalPage}}"
-Editorial: "{{publisher}}"
-Género: "{{category}}"
-isbn 10: "{{isbn10}}"
-isbn 13: "{{isbn13}}"
-ASIN: "{{asin}}"
-Fecha de publicación: "{{publishDate}}"
-Fecha de lectura:
+Páginas: {{totalPage}}
+Editorial: {{publisher}}
+Géneros: {{categories}}
+Isbn 10: {{isbn10}}
+Isbn 13: {{isbn13}}
+ASIN: {{asin}}
+Fecha de publicación: {{publishDate}}
+Fecha de lectura: 
 Portada: "{{localCoverImage}}"
-Series: "{{seriesLink}}"
-Series Number: {{seriesNumber}}
-tags:
-Resaltado:
+Enlace: {{link}}
+tags: {{tags}}
 Leído: false
 ---`,
+  English: `---
+Title: {{title}}
+Original title: {{originalTitle}}
+Author: {{author}}
+Translator: {{translator}}
+Prologue: ""
+Description: "{{description}}"
+Total Pages: {{totalPage}}
+Publisher: {{publisher}}
+Categories: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+Published: {{publishDate}}
+Date read:
+Cover: "{{localCoverImage}}"
+Link: {{link}}
+Tags: {{tags}}
+Read: false
+---`,
+  French: `---
+Titre: {{title}}
+Titre original: {{originalTitle}}
+Auteur: {{author}}
+Traducteur: {{translator}}
+Prologue: ""
+Description: "{{description}}"
+Nombre total de pages: {{totalPage}}
+Éditeur: {{publisher}}
+Catégories: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+Publié: {{publishDate}}
+Date de lecture: 
+Couverture: "{{localCoverImage}}"
+Lien: {{link}}
+tags: {{tags}}
+Lu: false
+---`,
+  German: `---
+Titel: {{title}}
+Originaltitel: {{originalTitle}}
+Autor: {{author}}
+Übersetzer: {{translator}}
+Prolog: ""
+Beschreibung: "{{description}}"
+Gesamtseitenzahl: {{totalPage}}
+Verlag: {{publisher}}
+Kategorien: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+Veröffentlicht: {{publishDate}}
+Lesedatum: 
+Cover: "{{localCoverImage}}"
+Link: {{link}}
+tags: {{tags}}
+Gelesen: false
+---`,
+  Italian: `---
+Titolo: {{title}}
+Titolo originale: {{originalTitle}}
+Autore: {{author}}
+Traduttore: {{translator}}
+Prologo: ""
+Descrizione: "{{description}}"
+Pagine totali: {{totalPage}}
+Editore: {{publisher}}
+Categorie: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+Pubblicato: {{publishDate}}
+Data di lettura: 
+Copertina: "{{localCoverImage}}"
+Link: {{link}}
+tags: {{tags}}
+Letto: false
+---`,
+  Portuguese: `---
+Título: {{title}}
+Título original: {{originalTitle}}
+Autor: {{author}}
+Tradutor: {{translator}}
+Prólogo: ""
+Descrição: "{{description}}"
+Total de páginas: {{totalPage}}
+Editora: {{publisher}}
+Categorias: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+Publicado: {{publishDate}}
+Data de leitura: 
+Capa: "{{localCoverImage}}"
+Link: {{link}}
+tags: {{tags}}
+Lido: false
+---`,
+  Dutch: `---
+Titel: {{title}}
+Oorspronkelijke titel: {{originalTitle}}
+Auteur: {{author}}
+Vertaler: {{translator}}
+Proloog: ""
+Beschrijving: "{{description}}"
+Totaal aantal pagina's: {{totalPage}}
+Uitgever: {{publisher}}
+Categorieën: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+Gepubliceerd: {{publishDate}}
+Gelezen op: 
+Omslag: "{{localCoverImage}}"
+Link: {{link}}
+tags: {{tags}}
+Gelezen: false
+---`,
+  Russian: `---
+Название: {{title}}
+Оригинальное название: {{originalTitle}}
+Автор: {{author}}
+Переводчик: {{translator}}
+Пролог: ""
+Описание: "{{description}}"
+Всего страниц: {{totalPage}}
+Издатель: {{publisher}}
+Категории: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+Опубликовано: {{publishDate}}
+Дата прочтения: 
+Обложка: "{{localCoverImage}}"
+Ссылка: {{link}}
+tags: {{tags}}
+Прочитано: false
+---`,
+  "Simplified Chinese": `---
+标题: {{title}}
+原标题: {{originalTitle}}
+作者: {{author}}
+译者: {{translator}}
+序言: ""
+描述: "{{description}}"
+总页数: {{totalPage}}
+出版社: {{publisher}}
+分类: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+出版日期: {{publishDate}}
+阅读日期: 
+封面: "{{localCoverImage}}"
+链接: {{link}}
+tags: {{tags}}
+已读: false
+---`,
+  Japanese: `---
+タイトル: {{title}}
+原題: {{originalTitle}}
+著者: {{author}}
+翻訳者: {{translator}}
+プロローグ: ""
+説明: "{{description}}"
+総ページ数: {{totalPage}}
+出版社: {{publisher}}
+カテゴリ: {{categories}}
+Isbn10: {{isbn10}}
+Isbn13: {{isbn13}}
+Asin: {{asin}}
+出版日: {{publishDate}}
+読了日: 
+表紙: "{{localCoverImage}}"
+リンク: {{link}}
+tags: {{tags}}
+読了: false
+---`,
+  Korean: `---
+제목: {{title}}
+원제: {{originalTitle}}
+저자: {{author}}
+번역가: {{translator}}
+프롤로그: ""
+설명: "{{description}}"
+총 페이지 수: {{totalPage}}
+출판사: "{{publisher}}"
+카테고리: "{{categories}}"
+Isbn10: "{{isbn10}}"
+Isbn13: "{{isbn13}}"
+Asin: "{{asin}}"
+출판일: "{{publishDate}}"
+읽은 날짜: 
+표지: "{{localCoverImage}}"
+링크: "{{link}}"
+tags: {{tags}}
+읽음: false
+---`,
+};
+
+export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
+  folder: "",
+  fileNameFormat: "{{title}} - {{author}}",
+  frontmatter: FRONTMATTER_TEMPLATES.Spanish,
   content: "",
-  useDefaultFrontmatter: true,
+  useDefaultFrontmatter: false,
   defaultFrontmatterKeyType: DefaultFrontmatterKeyType.camelCase,
   templateFile: "",
   serviceProvider: ServiceProvider.google,
   localePreference: "default",
   apiKey: "",
   openPageOnCompletion: true,
-  showCoverImageInSearch: false,
+  showCoverImageInSearch: true,
   enableCoverImageSave: false,
   enableCoverImageEdgeCurl: true,
   coverImagePath: "",
@@ -94,6 +296,13 @@ Leído: false
 };
 
 export class BookSearchSettingTab extends PluginSettingTab {
+  private serviceProviderExtraSettingButton: HTMLElement | null = null;
+  private preferredLocaleDropdownSetting: Setting | null = null;
+  private coverImageEdgeCurlToggleSetting: Setting | null = null;
+  private calibreServerUrlSetting: Setting | null = null;
+  private calibreLibraryIdSetting: Setting | null = null;
+  private calibreSettingsHeader: Setting | null = null;
+
   constructor(
     app: App,
     private plugin: BookSearchPlugin,
@@ -108,7 +317,9 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createHeader(title: string, containerEl: HTMLElement) {
-    return new Setting(containerEl).setHeading().setName(title);
+    const setting = new Setting(containerEl).setHeading().setName(title);
+    setting.settingEl.addClass("book-search-plugin__header");
+    return setting;
   }
 
   private createFileLocationSetting(containerEl) {
@@ -131,20 +342,23 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createFileNameFormatSetting(containerEl) {
-    const newFileNameHint = document.createDocumentFragment().createEl("code", {
+    const desc = document.createDocumentFragment();
+    desc.createSpan({ text: "Enter the file name format. Example: " });
+    const newFileNameHint = desc.createEl("code", {
       text:
         replaceDateInString(this.plugin.settings.fileNameFormat) ||
         "{{title}} - {{author}}",
     });
+
     new Setting(containerEl)
       .setClass("book-search-plugin__settings--new_file_name")
       .setName("New file name")
-      .setDesc("Enter the file name format.")
+      .setDesc(desc)
       .addSearch((cb) => {
         try {
           new FileNameFormatSuggest(this.app, cb.inputEl);
         } catch (e) {
-          console.error(e); // Improved error handling
+          console.error(e);
         }
         cb.setPlaceholder("Example: {{title}} - {{author}}")
           .setValue(this.plugin.settings.fileNameFormat)
@@ -156,140 +370,128 @@ export class BookSearchSettingTab extends PluginSettingTab {
               replaceDateInString(newValue) || "{{title}} - {{author}}";
           });
       });
-    containerEl
-      .createEl("div", {
-        cls: [
-          "setting-item-description",
-          "book-search-plugin__settings--new_file_name_hint",
-        ],
-      })
-      .append(newFileNameHint);
   }
 
-  private createTemplateFileSetting(containerEl: HTMLElement) {
-    const templateFileDesc = document.createDocumentFragment();
-    templateFileDesc.createDiv({
-      text: "Files will be available as templates.",
+  private createFrontmatterSetting(containerEl: HTMLElement) {
+    const desc = document.createDocumentFragment();
+    desc.createDiv({ text: "The frontmatter that is inserted into the text." });
+
+    const buttonContainer = desc.createDiv();
+    buttonContainer.style.display = "flex";
+    buttonContainer.style.gap = "8px";
+    buttonContainer.style.marginTop = "8px";
+
+    const restoreButton = buttonContainer.createEl("button", {
+      text: "Restore default",
+      cls: "mod-warning",
     });
-    templateFileDesc.createEl("a", {
-      text: "Example template",
-      href: `${docUrl}#example-template`,
+    restoreButton.onclick = () => {
+      this.plugin.settings.frontmatter = DEFAULT_SETTINGS.frontmatter;
+      void this.plugin.saveSettings().then(() => this.display());
+    };
+
+    const languagesButton = buttonContainer.createEl("button", {
+      text: "Languages",
     });
+    languagesButton.onclick = (event: MouseEvent) => {
+      const menu = new Menu();
+      Object.keys(FRONTMATTER_TEMPLATES).forEach((lang) => {
+        menu.addItem((item) => {
+          item.setTitle(lang).onClick(() => {
+            this.plugin.settings.frontmatter =
+              FRONTMATTER_TEMPLATES[lang as keyof typeof FRONTMATTER_TEMPLATES];
+            void this.plugin.saveSettings().then(() => this.display());
+          });
+        });
+      });
+      menu.showAtMouseEvent(event);
+    };
+
     new Setting(containerEl)
-      .setName("Template file")
-      .setDesc(templateFileDesc)
-      .addSearch((cb) => {
-        try {
-          new FileSuggest(this.app, cb.inputEl);
-        } catch {
-          // ignore
-        }
-        cb.setPlaceholder("Example: templates/template-file")
-          .setValue(this.plugin.settings.templateFile)
-          .onChange((newTemplateFile) => {
-            this.plugin.settings.templateFile = newTemplateFile;
+      .setName("Frontmatter")
+      .setDesc(desc)
+      .addTextArea((text) => {
+        text.inputEl.rows = 15;
+        text.inputEl.cols = 40;
+        text.inputEl.addClass("book-search-plugin__settings--textarea");
+        text
+          .setPlaceholder("Enter the frontmatter")
+          .setValue(this.plugin.settings.frontmatter)
+          .onChange((newValue) => {
+            this.plugin.settings.frontmatter = newValue;
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           });
       });
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.classList.add("book-search-plugin__settings");
+  private createContentSetting(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Content")
+      .setDesc(
+        "This content is automatically added to every new book note after the frontmatter. Use it to include default headings (e.g., # Thoughts), reading logs, or inline scripts for further customization.",
+      )
+      .addTextArea((text) => {
+        text.inputEl.rows = 10;
+        text.inputEl.cols = 40;
+        text.inputEl.addClass("book-search-plugin__settings--textarea");
+        text
+          .setPlaceholder("Enter the content")
+          .setValue(this.plugin.settings.content)
+          .onChange((newValue) => {
+            this.plugin.settings.content = newValue;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          });
+      });
+  }
 
-    this.createGeneralSettings(containerEl);
-    this.createTemplateFileSetting(containerEl);
+  private createCoverImageSaveSetting(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Enable cover image save")
+      .setDesc("Toggle to enable or disable saving cover images in notes.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.enableCoverImageSave)
+          .onChange((value) => {
+            this.plugin.settings.enableCoverImageSave = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
+  }
 
-    // Service Provider
-    let serviceProviderExtraSettingButton: HTMLElement | null = null;
-    let preferredLocaleDropdownSetting: Setting | null = null;
-    let coverImageEdgeCurlToggleSetting: Setting | null = null;
-    let calibreServerUrlSetting: Setting | null = null;
-    let calibreLibraryIdSetting: Setting | null = null;
-    let calibreSettingsHeader: Setting | null = null;
+  private createCoverImagePathSetting(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Cover image path")
+      .setDesc("Specify the path where cover images should be saved.")
+      .addSearch((cb) => {
+        try {
+          new FolderSuggest(this.app, cb.inputEl);
+        } catch {
+          // eslint-disable
+        }
+        cb.setPlaceholder("Enter the path (e.g., Images/Covers)")
+          .setValue(this.plugin.settings.coverImagePath)
+          .onChange((value) => {
+            this.plugin.settings.coverImagePath = value.trim();
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          });
+      });
+  }
 
-    const hideServiceProviderExtraSettingButton = () => {
-      if (serviceProviderExtraSettingButton !== null)
-        serviceProviderExtraSettingButton.addClass("book-search-plugin__hide");
-    };
-    const showServiceProviderExtraSettingButton = () => {
-      if (serviceProviderExtraSettingButton !== null)
-        serviceProviderExtraSettingButton.removeClass(
-          "book-search-plugin__hide",
-        );
-    };
-    const hideServiceProviderExtraSettingDropdown = () => {
-      if (preferredLocaleDropdownSetting !== null)
-        preferredLocaleDropdownSetting.settingEl.addClass(
-          "book-search-plugin__hide",
-        );
-    };
-    const showServiceProviderExtraSettingDropdown = () => {
-      if (preferredLocaleDropdownSetting !== null)
-        preferredLocaleDropdownSetting.settingEl.removeClass(
-          "book-search-plugin__hide",
-        );
-    };
-    const hideCoverImageEdgeCurlToggle = () => {
-      if (coverImageEdgeCurlToggleSetting !== null)
-        coverImageEdgeCurlToggleSetting.settingEl.addClass(
-          "book-search-plugin__hide",
-        );
-    };
-    const showCoverImageEdgeCurlToggle = () => {
-      if (coverImageEdgeCurlToggleSetting !== null)
-        coverImageEdgeCurlToggleSetting.settingEl.removeClass(
-          "book-search-plugin__hide",
-        );
-    };
-    const showCalibreSettings = () => {
-      if (calibreServerUrlSetting !== null)
-        calibreServerUrlSetting.settingEl.removeClass(
-          "book-search-plugin__hide",
-        );
-      if (calibreLibraryIdSetting !== null)
-        calibreLibraryIdSetting.settingEl.removeClass(
-          "book-search-plugin__hide",
-        );
-      if (calibreSettingsHeader !== null)
-        calibreSettingsHeader.settingEl.removeClass("book-search-plugin__hide");
-    };
-    const hideCalibreSettings = () => {
-      if (calibreServerUrlSetting !== null)
-        calibreServerUrlSetting.settingEl.addClass("book-search-plugin__hide");
-      if (calibreLibraryIdSetting !== null)
-        calibreLibraryIdSetting.settingEl.addClass("book-search-plugin__hide");
-      if (calibreSettingsHeader !== null)
-        calibreSettingsHeader.settingEl.addClass("book-search-plugin__hide");
-    };
+  private createShowTemplatePreviewSetting(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Show template preview")
+      .setDesc("Preview the rendered note before creating it.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showTemplatePreview)
+          .onChange((value) => {
+            this.plugin.settings.showTemplatePreview = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
+  }
 
-    const toggleServiceProviderExtraSettings = (
-      serviceProvider: ServiceProvider = this.plugin.settings?.serviceProvider,
-    ) => {
-      if (serviceProvider === ServiceProvider.goodreads) {
-        hideServiceProviderExtraSettingButton();
-        showServiceProviderExtraSettingDropdown();
-        showCoverImageEdgeCurlToggle();
-        hideCalibreSettings();
-      } else if (serviceProvider === ServiceProvider.calibre) {
-        showServiceProviderExtraSettingButton();
-        hideServiceProviderExtraSettingDropdown();
-        hideCoverImageEdgeCurlToggle();
-        showCalibreSettings();
-      } else if (serviceProvider === ServiceProvider.openlibrary) {
-        hideServiceProviderExtraSettingButton();
-        showServiceProviderExtraSettingDropdown();
-        showCoverImageEdgeCurlToggle();
-        hideCalibreSettings();
-      } else {
-        hideServiceProviderExtraSettingButton();
-        showServiceProviderExtraSettingDropdown();
-        showCoverImageEdgeCurlToggle();
-        hideCalibreSettings();
-      }
-    };
-
+  private createServiceProviderSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
       .setName("Service provider")
       .setDesc(
@@ -318,21 +520,24 @@ export class BookSearchSettingTab extends PluginSettingTab {
         );
         dropDown.onChange((value) => {
           const newValue = value as ServiceProvider;
-          toggleServiceProviderExtraSettings(newValue);
+          this.toggleServiceProviderExtraSettings(newValue);
           this.plugin.settings["serviceProvider"] = newValue;
           void this.plugin.saveSettings().catch((err) => console.warn(err));
         });
       })
       .addExtraButton((component) => {
-        serviceProviderExtraSettingButton = component.extraSettingsEl;
+        this.serviceProviderExtraSettingButton = component.extraSettingsEl;
         component.onClick(() => {
           new SettingServiceProviderModal(this.plugin).open();
         });
       });
 
-    calibreSettingsHeader = this.createHeader("Calibre settings", containerEl);
+    this.calibreSettingsHeader = this.createHeader(
+      "Calibre settings",
+      containerEl,
+    );
 
-    calibreServerUrlSetting = new Setting(containerEl)
+    this.calibreServerUrlSetting = new Setting(containerEl)
       .setName("Calibre server URL")
       .setDesc("Enter the URL of your Calibre content server.")
       .addText((text) =>
@@ -345,7 +550,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
           }),
       );
 
-    calibreLibraryIdSetting = new Setting(containerEl)
+    this.calibreLibraryIdSetting = new Setting(containerEl)
       .setName("Calibre library ID")
       .setDesc(
         "Enter the library ID (default: calibre). This is usually the folder name of your library.",
@@ -360,7 +565,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
           }),
       );
 
-    preferredLocaleDropdownSetting = new Setting(containerEl)
+    this.preferredLocaleDropdownSetting = new Setting(containerEl)
       .setName("Preferred locale")
       .setDesc("Sets the preferred locale to use when searching for books.")
       .addDropdown((dropDown) => {
@@ -402,14 +607,14 @@ export class BookSearchSettingTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
-      .setName("Show cover images in search")
-      .setDesc("Toggle to show or hide cover images in the search results.")
+    this.coverImageEdgeCurlToggleSetting = new Setting(containerEl)
+      .setName("Enable cover image edge curl effect")
+      .setDesc("Toggle to show or hide page curl effect in cover images.")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.plugin.settings.showCoverImageInSearch)
+          .setValue(this.plugin.settings.enableCoverImageEdgeCurl)
           .onChange((value) => {
-            this.plugin.settings.showCoverImageInSearch = value;
+            this.plugin.settings.enableCoverImageEdgeCurl = value;
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           }),
       );
@@ -426,55 +631,37 @@ export class BookSearchSettingTab extends PluginSettingTab {
           void this.plugin.saveSettings().catch((err) => console.warn(err));
         }),
       );
+  }
 
-    coverImageEdgeCurlToggleSetting = new Setting(containerEl)
-      .setName("Enable cover image edge curl effect")
-      .setDesc("Toggle to show or hide page curl effect in cover images.")
+  private createShowCoverImageInSearchSetting(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Show cover images in search")
+      .setDesc("Toggle to show or hide cover images in the search results.")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.plugin.settings.enableCoverImageEdgeCurl)
+          .setValue(this.plugin.settings.showCoverImageInSearch)
           .onChange((value) => {
-            this.plugin.settings.enableCoverImageEdgeCurl = value;
+            this.plugin.settings.showCoverImageInSearch = value;
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           }),
       );
+  }
 
-    new Setting(containerEl)
-      .setName("Enable cover image save")
-      .setDesc("Toggle to enable or disable saving cover images in notes.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableCoverImageSave)
-          .onChange((value) => {
-            this.plugin.settings.enableCoverImageSave = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
+  private createGoogleApiSettings(containerEl: HTMLElement) {
+    const googleDesc = document.createDocumentFragment();
+    googleDesc.createEl("div", {
+      text: "If you get 'Request Failed, status 429', it means you have reached the daily limit of the shared API key.",
+    });
+    googleDesc.createEl("div", {
+      text: "Please create your own Google Books API key at ",
+    });
+    googleDesc.createEl("a", {
+      text: "Google Cloud Console",
+      href: "https://console.cloud.google.com/apis/credentials",
+    });
+    googleDesc.createEl("span", { text: " and paste it below." });
 
-    new Setting(containerEl)
-      .setName("Cover image path")
-      .setDesc("Specify the path where cover images should be saved.")
-      .addSearch((cb) => {
-        try {
-          new FolderSuggest(this.app, cb.inputEl);
-        } catch {
-          // eslint-disable
-        }
-        cb.setPlaceholder("Enter the path (e.g., Images/Covers)")
-          .setValue(this.plugin.settings.coverImagePath)
-          .onChange((value) => {
-            this.plugin.settings.coverImagePath = value.trim();
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-
-    // Google API Settings
-    this.createHeader("Google API settings", containerEl);
-    new Setting(containerEl)
-      .setName("Google API settings description")
-      .setDesc(
-        "**Warning** please use this field after you must understand Google Cloud API, such as API key security.",
-      );
+    new Setting(containerEl).setName("Google API settings").setDesc(googleDesc);
 
     new Setting(containerEl)
       .setName("Status check")
@@ -514,13 +701,14 @@ export class BookSearchSettingTab extends PluginSettingTab {
             .then(() => new Notice("API key saved"));
         });
       });
+  }
 
-    // Advanced Features
-    this.createHeader("Advanced features", containerEl);
-
+  private createWarnOnDuplicateSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
       .setName("Warn on duplicate")
-      .setDesc("Show a warning before creating a note if one already exists for this book.")
+      .setDesc(
+        "Show a warning before creating a note if one already exists for this book.",
+      )
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.warnOnDuplicate)
@@ -529,10 +717,14 @@ export class BookSearchSettingTab extends PluginSettingTab {
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           }),
       );
+  }
 
+  private createEnableSeriesLinkingSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
       .setName("Enable series linking")
-      .setDesc("Automatically add series information and links (e.g., [[Series Name]]) to book notes.")
+      .setDesc(
+        "Automatically add series information and links (e.g., [[Series Name]]) to book notes.",
+      )
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.enableSeriesLinking)
@@ -541,19 +733,9 @@ export class BookSearchSettingTab extends PluginSettingTab {
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           }),
       );
+  }
 
-    new Setting(containerEl)
-      .setName("Show template preview")
-      .setDesc("Preview the rendered note before creating it.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.showTemplatePreview)
-          .onChange((value) => {
-            this.plugin.settings.showTemplatePreview = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-
+  private createSearchHistorySizeSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
       .setName("Search history size")
       .setDesc("Number of recent searches to remember (0 to disable).")
@@ -567,10 +749,14 @@ export class BookSearchSettingTab extends PluginSettingTab {
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           }),
       );
+  }
 
+  private createClearSearchHistorySetting(containerEl: HTMLElement) {
     new Setting(containerEl)
       .setName("Clear search history")
-      .setDesc(`Currently storing ${this.plugin.settings.searchHistory?.length || 0} search(es).`)
+      .setDesc(
+        `Currently storing ${this.plugin.settings.searchHistory?.length || 0} search(es).`,
+      )
       .addButton((button) =>
         button.setButtonText("Clear").onClick(() => {
           this.plugin.settings.searchHistory = [];
@@ -581,9 +767,153 @@ export class BookSearchSettingTab extends PluginSettingTab {
           });
         }),
       );
+  }
+
+  private toggleServiceProviderExtraSettings(
+    serviceProvider: ServiceProvider = this.plugin.settings?.serviceProvider,
+  ) {
+    if (serviceProvider === ServiceProvider.goodreads) {
+      this.hideServiceProviderExtraSettingButton();
+      this.showServiceProviderExtraSettingDropdown();
+      this.showCoverImageEdgeCurlToggle();
+      this.hideCalibreSettings();
+    } else if (serviceProvider === ServiceProvider.calibre) {
+      this.showServiceProviderExtraSettingButton();
+      this.hideServiceProviderExtraSettingDropdown();
+      this.hideCoverImageEdgeCurlToggle();
+      this.showCalibreSettings();
+    } else if (serviceProvider === ServiceProvider.openlibrary) {
+      this.hideServiceProviderExtraSettingButton();
+      this.showServiceProviderExtraSettingDropdown();
+      this.showCoverImageEdgeCurlToggle();
+      this.hideCalibreSettings();
+    } else {
+      this.hideServiceProviderExtraSettingButton();
+      this.showServiceProviderExtraSettingDropdown();
+      this.showCoverImageEdgeCurlToggle();
+      this.hideCalibreSettings();
+    }
+  }
+
+  private hideServiceProviderExtraSettingButton() {
+    if (this.serviceProviderExtraSettingButton !== null)
+      this.serviceProviderExtraSettingButton.addClass(
+        "book-search-plugin__hide",
+      );
+  }
+  private showServiceProviderExtraSettingButton() {
+    if (this.serviceProviderExtraSettingButton !== null)
+      this.serviceProviderExtraSettingButton.removeClass(
+        "book-search-plugin__hide",
+      );
+  }
+  private hideServiceProviderExtraSettingDropdown() {
+    if (this.preferredLocaleDropdownSetting !== null)
+      this.preferredLocaleDropdownSetting.settingEl.addClass(
+        "book-search-plugin__hide",
+      );
+  }
+  private showServiceProviderExtraSettingDropdown() {
+    if (this.preferredLocaleDropdownSetting !== null)
+      this.preferredLocaleDropdownSetting.settingEl.removeClass(
+        "book-search-plugin__hide",
+      );
+  }
+  private hideCoverImageEdgeCurlToggle() {
+    if (this.coverImageEdgeCurlToggleSetting !== null)
+      this.coverImageEdgeCurlToggleSetting.settingEl.addClass(
+        "book-search-plugin__hide",
+      );
+  }
+  private showCoverImageEdgeCurlToggle() {
+    if (this.coverImageEdgeCurlToggleSetting !== null)
+      this.coverImageEdgeCurlToggleSetting.settingEl.removeClass(
+        "book-search-plugin__hide",
+      );
+  }
+  private showCalibreSettings() {
+    if (this.calibreServerUrlSetting !== null)
+      this.calibreServerUrlSetting.settingEl.removeClass(
+        "book-search-plugin__hide",
+      );
+    if (this.calibreLibraryIdSetting !== null)
+      this.calibreLibraryIdSetting.settingEl.removeClass(
+        "book-search-plugin__hide",
+      );
+    if (this.calibreSettingsHeader !== null)
+      this.calibreSettingsHeader.settingEl.removeClass(
+        "book-search-plugin__hide",
+      );
+  }
+  private hideCalibreSettings() {
+    if (this.calibreServerUrlSetting !== null)
+      this.calibreServerUrlSetting.settingEl.addClass(
+        "book-search-plugin__hide",
+      );
+    if (this.calibreLibraryIdSetting !== null)
+      this.calibreLibraryIdSetting.settingEl.addClass(
+        "book-search-plugin__hide",
+      );
+    if (this.calibreSettingsHeader !== null)
+      this.calibreSettingsHeader.settingEl.addClass("book-search-plugin__hide");
+  }
+
+  private createTemplateFileSetting(containerEl: HTMLElement) {
+    const templateFileDesc = document.createDocumentFragment();
+    templateFileDesc.createDiv({
+      text: "Files will be available as templates.",
+    });
+    templateFileDesc.createEl("a", {
+      text: "Example template",
+      href: `${docUrl}#example-template`,
+    });
+    new Setting(containerEl)
+      .setName("Template file")
+      .setDesc(templateFileDesc)
+      .addSearch((cb) => {
+        try {
+          new FileSuggest(this.app, cb.inputEl);
+        } catch {
+          // ignore
+        }
+        cb.setPlaceholder("Example: templates/template-file")
+          .setValue(this.plugin.settings.templateFile)
+          .onChange((newTemplateFile) => {
+            this.plugin.settings.templateFile = newTemplateFile;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          });
+      });
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.classList.add("book-search-plugin__settings");
+
+    this.createHeader("General settings", containerEl);
+
+    this.createHeader("Book notes", containerEl);
+    this.createFileLocationSetting(containerEl);
+    this.createFileNameFormatSetting(containerEl);
+    this.createFrontmatterSetting(containerEl);
+    this.createTemplateFileSetting(containerEl);
+    this.createContentSetting(containerEl);
+    this.createCoverImageSaveSetting(containerEl);
+    this.createCoverImagePathSetting(containerEl);
+    this.createShowTemplatePreviewSetting(containerEl);
+
+    this.createHeader("Provider", containerEl);
+    this.createServiceProviderSetting(containerEl);
+    this.createShowCoverImageInSearchSetting(containerEl);
+    this.createGoogleApiSettings(containerEl);
+
+    this.createHeader("Advanced features", containerEl);
+    this.createWarnOnDuplicateSetting(containerEl);
+    this.createEnableSeriesLinkingSetting(containerEl);
+    this.createSearchHistorySizeSetting(containerEl);
+    this.createClearSearchHistorySetting(containerEl);
 
     // Initialize visibility
-    toggleServiceProviderExtraSettings();
+    this.toggleServiceProviderExtraSettings();
   }
 }
-

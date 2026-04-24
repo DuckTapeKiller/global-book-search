@@ -94,7 +94,7 @@ export class GoogleBooksApi implements BaseBooksApiImpl {
       author: this.formatList(item.authors),
       authors: item.authors,
       category: this.formatList(item.categories),
-      categories: item.categories,
+      categories: this.formatList(item.categories),
       publisher: item.publisher,
       totalPage: item.pageCount,
       coverUrl: this.setCoverImageEdgeCurl(
@@ -119,7 +119,7 @@ export class GoogleBooksApi implements BaseBooksApiImpl {
       author: "",
       authors: [],
       category: "",
-      categories: [],
+      categories: "",
       publisher: "",
       publishDate: "",
       totalPage: "",

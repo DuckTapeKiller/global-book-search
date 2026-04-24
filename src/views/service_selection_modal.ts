@@ -62,9 +62,10 @@ export class ServiceSelectionModal extends Modal {
           await new Promise<void>((resolve, reject) => {
             setTimeout(() => {
               // Use multi-select for Calibre
-              const action = service.value === "calibre"
-                ? this.plugin.createMultipleCalibreNotes()
-                : this.plugin.createNewBookNote(service.value);
+              const action =
+                service.value === "calibre"
+                  ? this.plugin.createMultipleCalibreNotes()
+                  : this.plugin.createNewBookNote(service.value);
 
               action.then(resolve).catch(reject);
             }, 10);

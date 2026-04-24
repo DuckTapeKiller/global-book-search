@@ -1,11 +1,4 @@
-import {
-  MarkdownView,
-  Notice,
-  Plugin,
-  TFile,
-  requestUrl,
-  Menu,
-} from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile } from "obsidian";
 import { factoryServiceProvider } from "@apis/base_api";
 import { CalibreApi } from "@apis/calibre_api";
 
@@ -21,113 +14,110 @@ import {
 } from "@views/duplicate_check_modal";
 import { CursorJumper } from "@utils/cursor_jumper";
 import { Book } from "@models/book.model";
+import { BookNoteCreator } from "@utils/note_creator";
 import {
   BookSearchSettingTab,
   BookSearchPluginSettings,
   DEFAULT_SETTINGS,
 } from "@settings/settings";
-import {
-  getTemplateContents,
-  applyTemplateTransformations,
-  useTemplaterPluginInFile,
-  executeInlineScriptsTemplates,
-} from "@utils/template";
-import {
-  replaceVariableSyntax,
-  makeFileName,
-  applyDefaultFrontMatter,
-  toStringFrontMatter,
-  createBookTags,
-} from "@utils/utils";
 
 export default class BookSearchPlugin extends Plugin {
   settings: BookSearchPluginSettings;
 
-  onload() {
-    void this.loadSettings().then(() => {
-      // This creates an icon in the left ribbon.
-      const ribbonIconEl = this.addRibbonIcon(
-        "book",
-        "Create new book note",
-        (evt) => this.selectServiceAndSearch(evt),
-      );
-      ribbonIconEl.addClass("obsidian-book-search-plugin-ribbon-class");
+  private noteCreator: BookNoteCreator;
 
-      // ===== Core Commands =====
-      this.addCommand({
-        id: "open-book-search-modal",
-        name: "Create new book note",
-        callback: () => {
-          void this.createNewBookNote().catch((err) => console.warn(err));
-        },
-      });
+  async onload() {
+    await this.loadSettings();
+    this.noteCreator = new BookNoteCreator(this.app, this.settings);
 
-      this.addCommand({
-        id: "open-book-search-modal-to-insert",
-        name: "Insert the metadata",
-        callback: () => {
-          void this.insertMetadata().catch((err) => console.warn(err));
-        },
-      });
+    // This creates an icon in the left ribbon.
+    const ribbonIconEl = this.addRibbonIcon(
+      "book",
+      "Create new book note",
+      (evt) => this.selectServiceAndSearch(evt),
+    );
+    ribbonIconEl.addClass("obsidian-book-search-plugin-ribbon-class");
 
-      // ===== Service-Specific Commands =====
-      this.addCommand({
-        id: "search-google-books",
-        name: "Search Google Books",
-        callback: () => {
-          void this.createNewBookNote("google").catch((err) => console.warn(err));
-        },
-      });
-
-      this.addCommand({
-        id: "search-goodreads",
-        name: "Search Goodreads",
-        callback: () => {
-          void this.createNewBookNote("goodreads").catch((err) => console.warn(err));
-        },
-      });
-
-      this.addCommand({
-        id: "search-calibre",
-        name: "Search Calibre (Multi-Select)",
-        callback: () => {
-          void this.createMultipleCalibreNotes().catch((err) => console.warn(err));
-        },
-      });
-
-      this.addCommand({
-        id: "search-openlibrary",
-        name: "Search OpenLibrary",
-        callback: () => {
-          void this.createNewBookNote("openlibrary").catch((err) => console.warn(err));
-        },
-      });
-
-      this.addCommand({
-        id: "browse-calibre",
-        name: "Browse Calibre Library",
-        callback: () => {
-          void this.browseCalibreLibrary().catch((err) => console.warn(err));
-        },
-      });
-
-      // ===== Utility Commands =====
-      this.addCommand({
-        id: "clear-search-history",
-        name: "Clear search history",
-        callback: () => {
-          this.clearSearchHistory();
-          new Notice("Search history cleared");
-        },
-      });
-
-      // This adds a settings tab
-      this.addSettingTab(new BookSearchSettingTab(this.app, this));
-
-      console.debug(
-        `Book Search: version ${this.manifest.version} (requires obsidian ${this.manifest.minAppVersion})`,
-      );
+    // ===== Core Commands =====
+    this.addCommand({
+      id: "open-book-search-modal",
+      name: "Create new book note",
+      callback: () => {
+        void this.createNewBookNote().catch((err) => console.warn(err));
+      },
     });
+
+    this.addCommand({
+      id: "open-book-search-modal-to-insert",
+      name: "Insert the metadata",
+      callback: () => {
+        void this.insertMetadata().catch((err) => console.warn(err));
+      },
+    });
+
+    // ===== Service-Specific Commands =====
+    this.addCommand({
+      id: "search-google-books",
+      name: "Search Google Books",
+      callback: () => {
+        void this.createNewBookNote("google").catch((err) => console.warn(err));
+      },
+    });
+
+    this.addCommand({
+      id: "search-goodreads",
+      name: "Search Goodreads",
+      callback: () => {
+        void this.createNewBookNote("goodreads").catch((err) =>
+          console.warn(err),
+        );
+      },
+    });
+
+    this.addCommand({
+      id: "search-calibre",
+      name: "Search Calibre (Multi-Select)",
+      callback: () => {
+        void this.createMultipleCalibreNotes().catch((err) =>
+          console.warn(err),
+        );
+      },
+    });
+
+    this.addCommand({
+      id: "search-openlibrary",
+      name: "Search OpenLibrary",
+      callback: () => {
+        void this.createNewBookNote("openlibrary").catch((err) =>
+          console.warn(err),
+        );
+      },
+    });
+
+    this.addCommand({
+      id: "browse-calibre",
+      name: "Browse Calibre Library",
+      callback: () => {
+        void this.browseCalibreLibrary().catch((err) => console.warn(err));
+      },
+    });
+
+    // ===== Utility Commands =====
+    this.addCommand({
+      id: "clear-search-history",
+      name: "Clear search history",
+      callback: () => {
+        this.clearSearchHistory();
+        new Notice("Search history cleared");
+      },
+    });
+
+    // This adds a settings tab
+    this.addSettingTab(new BookSearchSettingTab(this.app, this));
+
+    console.debug(
+      `Book Search: version ${this.manifest.version} (requires obsidian ${this.manifest.minAppVersion})`,
+    );
   }
 
   showNotice(message: unknown) {
@@ -140,7 +130,7 @@ export default class BookSearchPlugin extends Plugin {
             : JSON.stringify(message) || "Unknown error";
       new Notice(notice);
     } catch {
-      // eslint-disable
+      //
     }
   }
 
@@ -157,7 +147,10 @@ export default class BookSearchPlugin extends Plugin {
     // Add to beginning
     filtered.unshift(query);
     // Limit size
-    this.settings.searchHistory = filtered.slice(0, this.settings.maxSearchHistory || 10);
+    this.settings.searchHistory = filtered.slice(
+      0,
+      this.settings.maxSearchHistory || 10,
+    );
     void this.saveSettings();
   }
 
@@ -198,15 +191,18 @@ export default class BookSearchPlugin extends Plugin {
   // Core Book Search Functions
   // ========================================
 
-  async searchBookMetadata(query?: string): Promise<Book> {
-    const searchedBooks = await this.openBookSearchModal(query);
+  async searchBookMetadata(
+    query?: string,
+    serviceProvider?: string,
+  ): Promise<Book> {
+    const searchedBooks = await this.openBookSearchModal(
+      query,
+      serviceProvider,
+    );
     const book = await this.openBookSuggestModal(searchedBooks);
 
     // Enrich book with full details if provider supports it
-    const api = factoryServiceProvider(
-      this.settings,
-      this.serviceProviderOverride,
-    );
+    const api = factoryServiceProvider(this.settings, serviceProvider);
 
     if (api.getBook) {
       return await api.getBook(book);
@@ -214,138 +210,37 @@ export default class BookSearchPlugin extends Plugin {
     return book;
   }
 
-  async getRenderedContents(book: Book) {
-    const {
-      templateFile,
-      useDefaultFrontmatter,
-      defaultFrontmatterKeyType,
-      enableCoverImageSave,
-      coverImagePath,
-      frontmatter,
-      content,
-    } = this.settings;
-
-    // Generate tags automatically as requested
-    book.tags = createBookTags(book);
-
-    let contentBody = "";
-
-    if (enableCoverImageSave) {
-      const coverImageUrl =
-        book.coverLargeUrl ||
-        book.coverMediumUrl ||
-        book.coverSmallUrl ||
-        book.coverUrl;
-      if (coverImageUrl) {
-        const imageName = `${book.title} — ${book.author}.jpg`.replace(
-          /[:/\\?%*|"<>]/g,
-          "",
-        );
-        book.localCoverImage = await this.downloadAndSaveImage(
-          imageName,
-          coverImagePath,
-          coverImageUrl,
-        );
-      }
-    }
-
-    if (templateFile) {
-      const templateContents = await getTemplateContents(
-        this.app,
-        templateFile,
-      );
-      const replacedVariable = replaceVariableSyntax(
-        book,
-        applyTemplateTransformations(templateContents),
-      );
-      contentBody += executeInlineScriptsTemplates(book, replacedVariable);
-    } else {
-      let replacedVariableFrontmatter = replaceVariableSyntax(
-        book,
-        frontmatter,
-      );
-      if (useDefaultFrontmatter) {
-        replacedVariableFrontmatter = toStringFrontMatter(
-          applyDefaultFrontMatter(
-            book,
-            replacedVariableFrontmatter,
-            defaultFrontmatterKeyType,
-          ),
-        );
-      }
-      const replacedVariableContent = replaceVariableSyntax(book, content);
-      contentBody += replacedVariableFrontmatter
-        ? `---\n${replacedVariableFrontmatter}\n---\n${replacedVariableContent}`
-        : replacedVariableContent;
-    }
-
-    return contentBody;
-  }
-
-  async downloadAndSaveImage(
-    imageName: string,
-    directory: string,
-    imageUrl: string,
-  ): Promise<string> {
-    const { enableCoverImageSave } = this.settings;
-    if (!enableCoverImageSave) {
-      console.warn("Cover image saving is not enabled.");
-      return "";
-    }
-
-    try {
-      const response = await requestUrl({
-        url: imageUrl,
-        method: "GET",
-        headers: {
-          Accept: "image/*",
-        },
-      });
-
-      if (response.status !== 200) {
-        throw new Error(`Failed to download image: ${response.status}`);
-      }
-
-      const imageData = response.arrayBuffer;
-      const filePath = `${directory}/${imageName}`;
-      await this.app.vault.adapter.writeBinary(filePath, imageData);
-      // Return as wiki link format for clickable frontmatter
-      return `[[${filePath}]]`;
-    } catch (error) {
-      console.error("Error downloading or saving image:", error);
-      return "";
-    }
-  }
-
   async insertMetadata(): Promise<void> {
     try {
       const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (!markdownView) {
-        console.warn("Can not find an active markdown view");
+      if (!markdownView?.editor) {
+        console.warn("Can not find an active markdown view with editor");
         return;
       }
 
-      const book = await this.searchBookMetadata(markdownView.file.basename);
+      const editor = markdownView.editor;
+      const originalFile = markdownView.file;
+      const book = await this.searchBookMetadata(markdownView.file?.basename);
+      const renderedContents = await this.noteCreator.getRenderedContents(book);
 
-      if (!markdownView.editor) {
-        console.warn("Can not find editor from the active markdown view");
+      // Re-verify the same note is still active after modals closed
+      const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!currentView || currentView.file !== originalFile) {
+        this.showNotice("Active note changed — metadata not inserted.");
         return;
       }
 
-      const renderedContents = await this.getRenderedContents(book);
-      markdownView.editor.replaceRange(renderedContents, { line: 0, ch: 0 });
+      editor.replaceRange(renderedContents, { line: 0, ch: 0 });
+      await new CursorJumper(this.app).jumpToNextCursorLocation();
     } catch (err) {
       console.warn(err);
       this.showNotice(err);
     }
   }
 
-  serviceProviderOverride?: string;
-
   async createNewBookNote(serviceProvider?: string): Promise<void> {
     try {
-      this.serviceProviderOverride = serviceProvider;
-      const book = await this.searchBookMetadata();
+      const book = await this.searchBookMetadata(undefined, serviceProvider);
 
       // Check for duplicate
       const action = await this.checkForDuplicate(book);
@@ -359,7 +254,7 @@ export default class BookSearchPlugin extends Plugin {
           this.app,
           this.settings.folder,
           book.title,
-          book.isbn13 || book.isbn10,
+          book.isbn13 || book.isbn10 || book.ids,
         );
         if (existingFile) {
           await this.openNewBookNote(existingFile);
@@ -367,64 +262,65 @@ export default class BookSearchPlugin extends Plugin {
         return;
       }
 
-      const targetFile = await this.createNoteForBook(book);
+      const targetFile = await this.noteCreator.create(book);
       await this.openNewBookNote(targetFile);
     } catch (err) {
-      if (err.message !== "Cancelled request") {
+      if (err instanceof Error && err.message !== "Cancelled request") {
         console.warn(err);
         this.showNotice(err);
       }
     }
   }
 
-  /**
-   * Create a note for a single book (extracted for reuse in multi-import)
-   */
-  async createNoteForBook(book: Book): Promise<TFile> {
-    const renderedContents = await this.getRenderedContents(book);
-    const fileName = makeFileName(book, this.settings.fileNameFormat);
-    const filePath = `${this.settings.folder}/${fileName}`;
-    const targetFile = await this.app.vault.create(filePath, renderedContents);
-    await useTemplaterPluginInFile(this.app, targetFile);
-    return targetFile;
-  }
-
-  /**
-   * Import multiple books from Calibre at once
-   */
   async createMultipleCalibreNotes(): Promise<void> {
     try {
-      this.serviceProviderOverride = "calibre";
-
       // Search for books
-      const searchedBooks = await this.openBookSearchModal();
+      const searchedBooks = await this.openBookSearchModal(
+        undefined,
+        "calibre",
+      );
 
       // Open multi-select modal
-      const selectedBooks = await this.openCalibreMultiSelectModal(searchedBooks);
+      const selectedBooks =
+        await this.openCalibreMultiSelectModal(searchedBooks);
 
       if (selectedBooks.length === 0) {
         return;
       }
 
-      // Enrich selected books with full details
-      const api = factoryServiceProvider(this.settings, this.serviceProviderOverride);
+      // Enrich selected books with full details (with concurrency limit)
+      const api = factoryServiceProvider(this.settings, "calibre");
       const enrichedBooks: Book[] = [];
+      const CONCURRENCY_LIMIT = 5;
 
-      for (const book of selectedBooks) {
-        if (api.getBook) {
-          enrichedBooks.push(await api.getBook(book));
-        } else {
-          enrichedBooks.push(book);
-        }
+      for (let i = 0; i < selectedBooks.length; i += CONCURRENCY_LIMIT) {
+        const batch = selectedBooks.slice(i, i + CONCURRENCY_LIMIT);
+        const batchResults = await Promise.all(
+          batch.map(async (book) => {
+            if (api.getBook) {
+              return await api.getBook(book);
+            }
+            return book;
+          }),
+        );
+        enrichedBooks.push(...batchResults);
       }
 
       // Create notes for all selected books (with duplicate check)
       let successCount = 0;
       let skippedCount = 0;
       const errors: string[] = [];
+      const totalCount = enrichedBooks.length;
+      const progressNotice = new Notice(
+        `Importing 0 / ${totalCount} books...`,
+        0,
+      );
 
-      for (const book of enrichedBooks) {
+      for (const [index, book] of enrichedBooks.entries()) {
         try {
+          progressNotice.setMessage(
+            `Importing ${index + 1} / ${totalCount}: ${book.title}`,
+          );
           // Check for duplicate (skip modal for batch, just skip duplicates)
           if (this.settings.warnOnDuplicate) {
             const existingFile = findExistingBookNote(
@@ -439,13 +335,15 @@ export default class BookSearchPlugin extends Plugin {
             }
           }
 
-          await this.createNoteForBook(book);
+          await this.noteCreator.create(book);
           successCount++;
         } catch (err) {
-          console.warn(`Failed to create note for ${book.title}`, err);
-          errors.push(book.title);
+          errors.push(
+            `${book.title}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
+      progressNotice.hide();
 
       // Show summary
       let message = `Created ${successCount} book note${successCount !== 1 ? "s" : ""}`;
@@ -456,9 +354,8 @@ export default class BookSearchPlugin extends Plugin {
         message += `. Failed: ${errors.join(", ")}`;
       }
       new Notice(message);
-
     } catch (err) {
-      if (err.message !== "Cancelled request") {
+      if (err instanceof Error && err.message !== "Cancelled request") {
         console.warn(err);
         this.showNotice(err);
       }
@@ -494,13 +391,31 @@ export default class BookSearchPlugin extends Plugin {
         return;
       }
 
+      // Enrich selected books with full details
+      const enrichedBooks = await Promise.all(
+        selectedBooks.map(async (book) => {
+          if (calibreApi.getBook) {
+            return await calibreApi.getBook(book);
+          }
+          return book;
+        }),
+      );
+
       // Create notes for all selected books
       let successCount = 0;
       let skippedCount = 0;
       const errors: string[] = [];
+      const totalCount = enrichedBooks.length;
+      const progressNotice = new Notice(
+        `Importing 0 / ${totalCount} books...`,
+        0,
+      );
 
-      for (const book of selectedBooks) {
+      for (const [index, book] of enrichedBooks.entries()) {
         try {
+          progressNotice.setMessage(
+            `Importing ${index + 1} / ${totalCount}: ${book.title}`,
+          );
           if (this.settings.warnOnDuplicate) {
             const existingFile = findExistingBookNote(
               this.app,
@@ -514,13 +429,15 @@ export default class BookSearchPlugin extends Plugin {
             }
           }
 
-          await this.createNoteForBook(book);
+          await this.noteCreator.create(book);
           successCount++;
         } catch (err) {
-          console.warn(`Failed to create note for ${book.title}`, err);
-          errors.push(book.title);
+          errors.push(
+            `${book.title}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
+      progressNotice.hide();
 
       let message = `Created ${successCount} book note${successCount !== 1 ? "s" : ""}`;
       if (skippedCount > 0) {
@@ -530,9 +447,8 @@ export default class BookSearchPlugin extends Plugin {
         message += `. Failed: ${errors.join(", ")}`;
       }
       new Notice(message);
-
     } catch (err) {
-      if (err.message !== "Cancelled request") {
+      if (err instanceof Error && err.message !== "Cancelled request") {
         console.warn(err);
         this.showNotice(err);
       }
@@ -562,7 +478,7 @@ export default class BookSearchPlugin extends Plugin {
   async openNewBookNote(targetFile: TFile) {
     if (!this.settings.openPageOnCompletion) return;
 
-    const activeLeaf = this.app.workspace.getLeaf();
+    const activeLeaf = this.app.workspace.getLeaf("tab");
     if (!activeLeaf) {
       console.warn("No active leaf");
       return;
@@ -573,11 +489,19 @@ export default class BookSearchPlugin extends Plugin {
     await new CursorJumper(this.app).jumpToNextCursorLocation();
   }
 
-  async openBookSearchModal(query = ""): Promise<Book[]> {
+  async openBookSearchModal(
+    query = "",
+    serviceProvider?: string,
+  ): Promise<Book[]> {
     return new Promise((resolve, reject) => {
-      return new BookSearchModal(this, query, (error, results) => {
-        return error ? reject(error) : resolve(results);
-      }).open();
+      return new BookSearchModal(
+        this,
+        query,
+        serviceProvider,
+        (error, results) => {
+          return error ? reject(error) : resolve(results);
+        },
+      ).open();
     });
   }
 
@@ -606,4 +530,3 @@ export default class BookSearchPlugin extends Plugin {
     new ServiceSelectionModal(this).open();
   }
 }
-

@@ -3,52 +3,52 @@ export interface FrontMatter {
 }
 
 export interface Book {
-  title: string; // 책 제목
-  subtitle?: string;
-  author: string; // 저자
+  // Required — every API must provide these
+  title: string;
+  author: string;
   authors: string[];
-  category?: string; // 카테고리
-  categories?: string[];
-  publisher?: string; // 출판사
-  publishDate?: string; // 출판일
-  totalPage?: number | string; // 전체 페이지
-  coverUrl?: string; // 커버 URL
-  coverSmallUrl?: string; // 커버 URL
-  coverMediumUrl?: string; // 커버 URL
-  coverLargeUrl?: string; // 커버 URL
-  localCoverImage?: string;
-  status?: string; // 읽기 상태(읽기전, 읽는중, 읽기완료)
-  startReadDate?: string; // 읽기 시작한 일시
-  finishReadDate?: string; // 읽기 완료한 일시
-  myRate?: number | string; //나의 평점
-  bookNote?: string; //서평 기록 여부
+  coverUrl: string;
+  link: string;
+
+  // Optional — explicitly typed
+  subtitle?: string;
   isbn10?: string;
   isbn13?: string;
-  isbn?: string;
-  link?: string;
+  isbn?: string; // used by some APIs as a catch-all
   description?: string;
-  previewLink?: string;
-  originalTitle?: string; // 원제
-  translator?: string; // 번역가
-  narrator?: string; // 낭독자
+  publisher?: string;
+  publishDate?: string;
+  totalPage?: number | string;
+  categories?: string;
+  category?: string;
+  originalTitle?: string;
+  translator?: string;
+  narrator?: string;
   asin?: string;
+
+  // Populated by plugin, not APIs
   tags?: string[];
+  localCoverImage?: string;
+
+  // Calibre-specific
+  series?: string;
+  seriesNumber?: number | string;
+  seriesLink?: string;
   ids?: string;
-
-  // Series information
-  series?: string; // Series name
-  seriesNumber?: number | string; // Book number in series
-  seriesLink?: string; // Formatted as [[Series Name]]
-
-  // Reading progress tracking
-  currentPage?: number | string;
-  readingProgress?: number | string; // Percentage 0-100
-
-  // Custom Calibre columns (dynamic)
   customColumns?: Record<string, unknown>;
+  sourceProvider?: string;
+  sourceId?: string;
 
-  // Source tracking for metadata updates
-  sourceProvider?: string; // 'calibre', 'goodreads', 'google', etc.
-  sourceId?: string; // ID in the source system
+  // Extra UI/UX fields
+  status?: string;
+  startReadDate?: string;
+  finishReadDate?: string;
+  myRate?: number | string;
+  bookNote?: string;
+  currentPage?: number | string;
+  readingProgress?: number | string;
+  previewLink?: string;
+  coverSmallUrl?: string;
+  coverMediumUrl?: string;
+  coverLargeUrl?: string;
 }
-
