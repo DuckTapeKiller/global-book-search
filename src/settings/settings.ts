@@ -52,11 +52,11 @@ Autor: {{author}}
 Traductor: {{translator}}
 Prólogo: ""
 Resumen: "{{description}}"
-Páginas: {{totalPage}}
+Páginas: "{{totalPage}}"
 Editorial: {{publisher}}
 Géneros: {{categories}}
-Isbn 10: {{isbn10}}
-Isbn 13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 ASIN: {{asin}}
 Fecha de publicación: {{publishDate}}
 Fecha de lectura: 
@@ -72,11 +72,11 @@ Author: {{author}}
 Translator: {{translator}}
 Prologue: ""
 Description: "{{description}}"
-Total Pages: {{totalPage}}
+Total Pages: "{{totalPage}}"
 Publisher: {{publisher}}
 Categories: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 Published: {{publishDate}}
 Date read:
@@ -92,11 +92,11 @@ Auteur: {{author}}
 Traducteur: {{translator}}
 Prologue: ""
 Description: "{{description}}"
-Nombre total de pages: {{totalPage}}
+Nombre total de pages: "{{totalPage}}"
 Éditeur: {{publisher}}
 Catégories: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 Publié: {{publishDate}}
 Date de lecture: 
@@ -112,11 +112,11 @@ Autor: {{author}}
 Übersetzer: {{translator}}
 Prolog: ""
 Beschreibung: "{{description}}"
-Gesamtseitenzahl: {{totalPage}}
+Gesamtseitenzahl: "{{totalPage}}"
 Verlag: {{publisher}}
 Kategorien: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 Veröffentlicht: {{publishDate}}
 Lesedatum: 
@@ -132,11 +132,11 @@ Autore: {{author}}
 Traduttore: {{translator}}
 Prologo: ""
 Descrizione: "{{description}}"
-Pagine totali: {{totalPage}}
+Pagine totali: "{{totalPage}}"
 Editore: {{publisher}}
 Categorie: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 Pubblicato: {{publishDate}}
 Data di lettura: 
@@ -152,11 +152,11 @@ Autor: {{author}}
 Tradutor: {{translator}}
 Prólogo: ""
 Descrição: "{{description}}"
-Total de páginas: {{totalPage}}
+Total de páginas: "{{totalPage}}"
 Editora: {{publisher}}
 Categorias: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 Publicado: {{publishDate}}
 Data de leitura: 
@@ -172,11 +172,11 @@ Auteur: {{author}}
 Vertaler: {{translator}}
 Proloog: ""
 Beschrijving: "{{description}}"
-Totaal aantal pagina's: {{totalPage}}
+Totaal aantal pagina's: "{{totalPage}}"
 Uitgever: {{publisher}}
 Categorieën: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 Gepubliceerd: {{publishDate}}
 Gelezen op: 
@@ -192,11 +192,11 @@ Gelezen: false
 Переводчик: {{translator}}
 Пролог: ""
 Описание: "{{description}}"
-Всего страниц: {{totalPage}}
+Всего страниц: "{{totalPage}}"
 Издатель: {{publisher}}
 Категории: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 Опубликовано: {{publishDate}}
 Дата прочтения: 
@@ -212,11 +212,11 @@ tags: {{tags}}
 译者: {{translator}}
 序言: ""
 描述: "{{description}}"
-总页数: {{totalPage}}
+总页数: "{{totalPage}}"
 出版社: {{publisher}}
 分类: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 出版日期: {{publishDate}}
 阅读日期: 
@@ -232,11 +232,11 @@ tags: {{tags}}
 翻訳者: {{translator}}
 プロローグ: ""
 説明: "{{description}}"
-総ページ数: {{totalPage}}
+総ページ数: "{{totalPage}}"
 出版社: {{publisher}}
 カテゴリ: {{categories}}
-Isbn10: {{isbn10}}
-Isbn13: {{isbn13}}
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: {{asin}}
 出版日: {{publishDate}}
 読了日: 
@@ -252,11 +252,11 @@ tags: {{tags}}
 번역가: {{translator}}
 프롤로그: ""
 설명: "{{description}}"
-총 페이지 수: {{totalPage}}
+총 페이지 수: "{{totalPage}}"
 출판사: "{{publisher}}"
 카테고리: "{{categories}}"
-Isbn10: "{{isbn10}}"
-Isbn13: "{{isbn13}}"
+isbn 10: "{{isbn10}}"
+isbn 13: "{{isbn13}}"
 Asin: "{{asin}}"
 출판일: "{{publishDate}}"
 읽은 날짜: 

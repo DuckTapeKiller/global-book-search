@@ -139,6 +139,24 @@ export function toStringFrontMatter(frontMatter: object): string {
         return `${key}: ""\n`;
       }
 
+      const isNumericStringKey =
+        key.toLowerCase().includes("isbn") ||
+        key.toLowerCase().includes("páginas") ||
+        key.toLowerCase().includes("pages") ||
+        key.toLowerCase().includes("pagine") ||
+        key.toLowerCase().includes("pagina") ||
+        key.toLowerCase().includes("페이지") ||
+        key.toLowerCase().includes("页") ||
+        key.toLowerCase().includes("страниц") ||
+        key.toLowerCase().includes("seiten") ||
+        key.toLowerCase().includes("page");
+
+      if (isNumericStringKey) {
+        // Force quotes for numeric strings like ISBN and Pages to prevent Obsidian/YAML issues
+        stringValue = stringValue.replace(/^"|"$/g, "");
+        return `${key}: "${stringValue}"\n`;
+      }
+
       if (isDescriptionKey) {
         // Strip leading/trailing quotes if they exist to avoid double quoting
         stringValue = stringValue.replace(/^"|"$/g, "");
