@@ -31,7 +31,7 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
   async getByQuery(query: string): Promise<Book[]> {
     try {
       // Use general search for better results: https://openlibrary.org/dev/docs/api/search
-      const searchUrl = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}`;
+      const searchUrl = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=20`;
 
       const searchRes = await requestUrl({
         url: searchUrl,
@@ -210,6 +210,7 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
       category: doc.subject ? doc.subject[0] : "",
       asin: "", // OpenLibrary doesn't use ASIN usually
       originalTitle: doc.original_title || "",
+      translator: "",
       tags: [], // Initialize tags empty, main.ts populates them
     };
   }

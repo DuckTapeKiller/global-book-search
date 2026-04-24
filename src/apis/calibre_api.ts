@@ -18,7 +18,8 @@ export class CalibreApi implements BaseBooksApiImpl {
     try {
       // Use Calibre's AJAX search endpoint
       // GET /ajax/search?query={query}
-      const searchUrl = `${this.serverUrl}/ajax/search?query=${encodeURIComponent(query)}`;
+      const validLibraryId = encodeURIComponent(this.libraryId || "calibre");
+      const searchUrl = `${this.serverUrl}/ajax/search?query=${encodeURIComponent(query)}&library_id=${validLibraryId}`;
 
       const searchRes = await requestUrl({
         url: searchUrl,
@@ -39,9 +40,14 @@ export class CalibreApi implements BaseBooksApiImpl {
       // Limit results to avoid overwhelming requests
       const topBookIds = bookIds.slice(0, 20);
 
-      const books = await Promise.all(
+      const results = await Promise.allSettled(
         topBookIds.map((id) => this.getBookDetails(id)),
       );
+      const books = results
+        .filter(
+          (r): r is PromiseFulfilledResult<Book> => r.status === "fulfilled",
+        )
+        .map((r) => r.value);
 
       return books;
     } catch (error) {
@@ -72,24 +78,18 @@ export class CalibreApi implements BaseBooksApiImpl {
       let series: Array<{ name: string; count: number }> = [];
       let authors: string[] = [];
 
-      for (const category of categories) {
-        if (category.name === "tags") {
-          // Fetch tag items
-          const tagItems = await this.getCategoryItems("tags");
-          tags = tagItems.map((t: { name: string }) => t.name);
-        } else if (category.name === "series") {
-          // Fetch series items
-          const seriesItems = await this.getCategoryItems("series");
-          series = seriesItems.map((s: { name: string; count?: number }) => ({
-            name: s.name,
-            count: s.count || 0,
-          }));
-        } else if (category.name === "authors") {
-          // Fetch author items
-          const authorItems = await this.getCategoryItems("authors");
-          authors = authorItems.map((a: { name: string }) => a.name);
-        }
-      }
+      const [tagItems, seriesItems, authorItems] = await Promise.all([
+        this.getCategoryItems("tags"),
+        this.getCategoryItems("series"),
+        this.getCategoryItems("authors"),
+      ]);
+
+      tags = tagItems.map((t: { name: string }) => t.name);
+      series = seriesItems.map((s: { name: string; count?: number }) => ({
+        name: s.name,
+        count: s.count || 0,
+      }));
+      authors = authorItems.map((a: { name: string }) => a.name);
 
       return { tags, series, authors };
     } catch (error) {
@@ -203,11 +203,17 @@ export class CalibreApi implements BaseBooksApiImpl {
 
     // ISBN parsing
     const identifiers = data.identifiers || {};
-    let isbn = identifiers.isbn || data.isbn || "";
-    if (isbn && typeof isbn === "string") {
-      isbn = isbn.replace(/^isbn:/i, "");
-    }
-    const ids = isbn;
+    const isbn13 =
+      identifiers["isbn13"] ||
+      identifiers["isbn-13"] ||
+      (identifiers["isbn"]?.length === 13 ? identifiers["isbn"] : "") ||
+      "";
+    const isbn10 =
+      identifiers["isbn10"] ||
+      identifiers["isbn-10"] ||
+      (identifiers["isbn"]?.length === 10 ? identifiers["isbn"] : "") ||
+      "";
+    const ids = isbn13 || isbn10 || "";
 
     // Publisher and date
     const publisher = data.publisher || "";
@@ -271,8 +277,8 @@ export class CalibreApi implements BaseBooksApiImpl {
       description,
       link: bookUrl,
       previewLink: bookUrl,
-      isbn10: isbn.length === 10 ? isbn : "",
-      isbn13: isbn.length === 13 ? isbn : "",
+      isbn10,
+      isbn13,
       ids: ids,
       originalTitle: "",
       translator: "",

@@ -95,6 +95,16 @@ export default class BookSearchPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "search-storygraph",
+      name: "Search StoryGraph",
+      callback: () => {
+        void this.createNewBookNote("storygraph").catch((err) =>
+          console.warn(err),
+        );
+      },
+    });
+
+    this.addCommand({
       id: "browse-calibre",
       name: "Browse Calibre Library",
       callback: () => {
@@ -167,9 +177,11 @@ export default class BookSearchPlugin extends Plugin {
   // Duplicate Detection
   // ========================================
 
-  async checkForDuplicate(book: Book): Promise<DuplicateAction> {
+  async checkForDuplicate(
+    book: Book,
+  ): Promise<{ action: DuplicateAction; file?: TFile }> {
     if (!this.settings.warnOnDuplicate) {
-      return DuplicateAction.CREATE_ANYWAY;
+      return { action: DuplicateAction.CREATE_ANYWAY };
     }
 
     const existingFile = findExistingBookNote(
@@ -181,10 +193,11 @@ export default class BookSearchPlugin extends Plugin {
 
     if (existingFile) {
       const modal = new DuplicateCheckModal(this.app, existingFile, book.title);
-      return await modal.waitForChoice();
+      const action = await modal.waitForChoice();
+      return { action, file: existingFile };
     }
 
-    return DuplicateAction.CREATE_ANYWAY;
+    return { action: DuplicateAction.CREATE_ANYWAY };
   }
 
   // ========================================
@@ -230,7 +243,13 @@ export default class BookSearchPlugin extends Plugin {
         return;
       }
 
-      editor.replaceRange(renderedContents, { line: 0, ch: 0 });
+      const lastLine = editor.lastLine();
+      const lastCh = editor.getLine(lastLine).length;
+      editor.replaceRange(
+        renderedContents,
+        { line: 0, ch: 0 },
+        { line: lastLine, ch: lastCh },
+      );
       await new CursorJumper(this.app).jumpToNextCursorLocation();
     } catch (err) {
       console.warn(err);
@@ -243,22 +262,14 @@ export default class BookSearchPlugin extends Plugin {
       const book = await this.searchBookMetadata(undefined, serviceProvider);
 
       // Check for duplicate
-      const action = await this.checkForDuplicate(book);
+      const { action, file: existingFile } = await this.checkForDuplicate(book);
 
       if (action === DuplicateAction.CANCEL) {
         return;
       }
 
-      if (action === DuplicateAction.OPEN_EXISTING) {
-        const existingFile = findExistingBookNote(
-          this.app,
-          this.settings.folder,
-          book.title,
-          book.isbn13 || book.isbn10 || book.ids,
-        );
-        if (existingFile) {
-          await this.openNewBookNote(existingFile);
-        }
+      if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
+        await this.openNewBookNote(existingFile);
         return;
       }
 
@@ -391,15 +402,22 @@ export default class BookSearchPlugin extends Plugin {
         return;
       }
 
-      // Enrich selected books with full details
-      const enrichedBooks = await Promise.all(
-        selectedBooks.map(async (book) => {
-          if (calibreApi.getBook) {
-            return await calibreApi.getBook(book);
-          }
-          return book;
-        }),
-      );
+      // Enrich selected books with full details (with concurrency limit)
+      const enrichedBooks: Book[] = [];
+      const CONCURRENCY_LIMIT = 5;
+
+      for (let i = 0; i < selectedBooks.length; i += CONCURRENCY_LIMIT) {
+        const batch = selectedBooks.slice(i, i + CONCURRENCY_LIMIT);
+        const batchResults = await Promise.all(
+          batch.map(async (book) => {
+            if (calibreApi.getBook) {
+              return await calibreApi.getBook(book);
+            }
+            return book;
+          }),
+        );
+        enrichedBooks.push(...batchResults);
+      }
 
       // Create notes for all selected books
       let successCount = 0;

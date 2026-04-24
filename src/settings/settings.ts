@@ -310,12 +310,6 @@ export class BookSearchSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  private createGeneralSettings(containerEl) {
-    this.createHeader("General settings", containerEl);
-    this.createFileLocationSetting(containerEl);
-    this.createFileNameFormatSetting(containerEl);
-  }
-
   private createHeader(title: string, containerEl: HTMLElement) {
     const setting = new Setting(containerEl).setHeading().setName(title);
     setting.settingEl.addClass("book-search-plugin__header");
@@ -514,6 +508,10 @@ export class BookSearchSettingTab extends PluginSettingTab {
         dropDown.addOption(
           ServiceProvider.openlibrary,
           `${ServiceProvider.openlibrary} (Public API)`,
+        );
+        dropDown.addOption(
+          ServiceProvider.storygraph,
+          `${ServiceProvider.storygraph} (Scraping)`,
         );
         dropDown.setValue(
           this.plugin.settings?.serviceProvider ?? ServiceProvider.google,
@@ -787,6 +785,11 @@ export class BookSearchSettingTab extends PluginSettingTab {
       this.showServiceProviderExtraSettingDropdown();
       this.showCoverImageEdgeCurlToggle();
       this.hideCalibreSettings();
+    } else if (serviceProvider === ServiceProvider.storygraph) {
+      this.hideServiceProviderExtraSettingButton();
+      this.hideServiceProviderExtraSettingDropdown();
+      this.hideCoverImageEdgeCurlToggle();
+      this.hideCalibreSettings();
     } else {
       this.hideServiceProviderExtraSettingButton();
       this.showServiceProviderExtraSettingDropdown();
@@ -889,8 +892,6 @@ export class BookSearchSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.classList.add("book-search-plugin__settings");
-
-    this.createHeader("General settings", containerEl);
 
     this.createHeader("Book notes", containerEl);
     this.createFileLocationSetting(containerEl);

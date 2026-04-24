@@ -51,6 +51,7 @@ export class GoogleBooksApi implements BaseBooksApiImpl {
       const searchResults = await apiGet<GoogleBooksResponse>(
         "https://www.googleapis.com/books/v1/volumes",
         params,
+        this.apiKey ? { "X-goog-api-key": this.apiKey } : undefined,
       );
       if (!searchResults?.totalItems) return [];
 
@@ -128,6 +129,8 @@ export class GoogleBooksApi implements BaseBooksApiImpl {
       description: "",
       link: "",
       previewLink: "",
+      isbn10: "",
+      isbn13: "",
       ...this.extractBasicBookInfo(item),
       ...this.extractISBNs(item.industryIdentifiers),
     };

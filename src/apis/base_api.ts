@@ -6,6 +6,7 @@ import { GoogleBooksApi } from "./google_books_api";
 import { GoodreadsApi } from "./goodreads_api";
 import { CalibreApi } from "./calibre_api";
 import { OpenLibraryApi } from "./open_library_api";
+import { StoryGraphApi } from "./storygraph_api";
 
 export interface BaseBooksApiImpl {
   getByQuery(query: string, options?: Record<string, string>): Promise<Book[]>;
@@ -36,6 +37,8 @@ export function factoryServiceProvider(
       );
     case ServiceProvider.openlibrary:
       return new OpenLibraryApi();
+    case ServiceProvider.storygraph:
+      return new StoryGraphApi();
     default:
       throw new Error("Unsupported service provider.");
   }
@@ -66,7 +69,6 @@ export async function apiGet<T>(
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-          "X-goog-api-key": (params["key"] || "").toString(),
           Accept: "application/json",
           "Content-Type": "application/json; charset=utf-8",
           ...headers,
@@ -77,12 +79,13 @@ export async function apiGet<T>(
     } catch (error: unknown) {
       lastError = error;
       const err = error as { status?: number; message?: string };
-      if (err.status === 429 && i < MAX_RETRIES) {
+      const isRetryable =
+        !err.status || err.status === 429 || err.status >= 500;
+      if (isRetryable && i < MAX_RETRIES) {
         await delay(RETRY_DELAY * (i + 1));
         continue;
       }
-      if (i === MAX_RETRIES) break;
-      await delay(RETRY_DELAY * (i + 1));
+      break;
     }
   }
 

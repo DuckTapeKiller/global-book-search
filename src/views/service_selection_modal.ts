@@ -18,6 +18,7 @@ export class ServiceSelectionModal extends Modal {
       { label: "Goodreads", value: "goodreads" },
       { label: "Calibre", value: "calibre" },
       { label: "OpenLibrary", value: "openlibrary" },
+      { label: "StoryGraph", value: "storygraph" },
       { label: "Google Books", value: "google" },
     ];
 

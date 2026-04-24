@@ -3,4 +3,5 @@ export enum ServiceProvider {
   goodreads = "goodreads",
   calibre = "calibre",
   openlibrary = "openlibrary",
+  storygraph = "storygraph",
 }

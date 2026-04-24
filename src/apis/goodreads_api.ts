@@ -199,7 +199,10 @@ export class GoodreadsApi implements BaseBooksApiImpl {
       try {
         const data = JSON.parse($(el).html() || "{}");
         if (data["@type"] === "Book") {
-          if (data.isbn) isbn13 = data.isbn;
+          if (data.isbn) {
+            if (data.isbn.length === 13) isbn13 = data.isbn;
+            else if (data.isbn.length === 10) isbn10 = data.isbn;
+          }
           if (data.numberOfPages) {
             totalPage = data.numberOfPages.toString();
           }
