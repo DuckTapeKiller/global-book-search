@@ -15,6 +15,7 @@ This plugin is based on the architecture of [obsidian-book-search-plugin](https:
     *   **Calibre**: Connects to your local library to import books you own.
     *   **OpenLibrary**: Fetches open-source book data.
     *   **Google Books**: The classic search provider.
+    *   **Story Graph**: Indie version of Goodreads. 
 *   **Smart Tag Generation**: Automatically generates tags based on the author and title in `snake_case` (e.g., `ernest_hemingway`, `for_whom_the_bell_tolls`).
 *   **YAML List Support**: Tags are automatically formatted as correct YAML lists.
 *   **Template Flexibility**: Supports custom frontmatter templates with extensive variables.
