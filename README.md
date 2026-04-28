@@ -2,7 +2,7 @@
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ducktapekiller)
 
-**Book Search Plus** is a plugin for Obsidian that allows you to search for books and create notes with rich metadata. It supports multiple providers, including **Goodreads** and **Story Graph** (via scraping), **OpenLibrary** (public API), **Calibre** (local library), and **Google Books**.
+**Book Search Plus** is a plugin for Obsidian that allows you to search for books and create notes with rich metadata. It supports multiple providers, including **Goodreads** (via scraping), **OpenLibrary** (public API), **Calibre** (local library), and **Google Books**.
 
 This version features a **refined UI**, **smart tag generation**, and enhanced customization options.
 
@@ -15,7 +15,6 @@ This plugin is based on the architecture of [obsidian-book-search-plugin](https:
     *   **Calibre**: Connects to your local library to import books you own.
     *   **OpenLibrary**: Fetches open-source book data.
     *   **Google Books**: The classic search provider.
-    *   **Story Graph**: Indie version of Goodreads. 
 *   **Smart Tag Generation**: Automatically generates tags based on the author and title in `snake_case` (e.g., `ernest_hemingway`, `for_whom_the_bell_tolls`).
 *   **YAML List Support**: Tags are automatically formatted as correct YAML lists.
 *   **Template Flexibility**: Supports custom frontmatter templates with extensive variables.

@@ -21,6 +21,11 @@ import {
   DEFAULT_SETTINGS,
 } from "@settings/settings";
 
+import { GlobalSearchModal } from "@views/global_search_modal";
+import { GlobalSuggestModal } from "@views/global_suggest_modal";
+import { EnrichmentProgressModal } from "@views/enrichment_progress_modal";
+import { enrichBookByISBN, BookWithSource } from "@apis/global_search";
+
 export default class BookSearchPlugin extends Plugin {
   settings: BookSearchPluginSettings;
 
@@ -32,7 +37,7 @@ export default class BookSearchPlugin extends Plugin {
 
     // This creates an icon in the left ribbon.
     const ribbonIconEl = this.addRibbonIcon(
-      "book",
+      "library-big",
       "Create new book note",
       (evt) => this.selectServiceAndSearch(evt),
     );
@@ -109,6 +114,14 @@ export default class BookSearchPlugin extends Plugin {
       name: "Browse Calibre Library",
       callback: () => {
         void this.browseCalibreLibrary().catch((err) => console.warn(err));
+      },
+    });
+
+    this.addCommand({
+      id: "global-book-search",
+      name: "Global Search (all sources)",
+      callback: () => {
+        void this.createNewBookNoteGlobal().catch((err) => console.warn(err));
       },
     });
 
@@ -542,6 +555,81 @@ export default class BookSearchPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async createNewBookNoteGlobal(): Promise<void> {
+    try {
+      // 1. Open global search input modal
+      const searchedBooks = await new Promise<BookWithSource[]>(
+        (resolve, reject) => {
+          new GlobalSearchModal(this, "", (error, results) => {
+            if (error) reject(error);
+            else resolve(results!);
+          }).open();
+        },
+      );
+
+      // 2. Open global suggest modal (source-tagged results)
+      const selectedBook = await new Promise<BookWithSource>(
+        (resolve, reject) => {
+          new GlobalSuggestModal(
+            this.app,
+            this.settings.showCoverImageInSearch,
+            searchedBooks,
+            (error, book) => {
+              if (error) reject(error);
+              else resolve(book!);
+            },
+          ).open();
+        },
+      );
+
+      // 3. Open progress modal
+      const progressModal = new EnrichmentProgressModal(this.app);
+      progressModal.open();
+
+      try {
+        // 4. Enrich by ISBN
+        const { book: enrichedBook, sources } = await enrichBookByISBN(
+          selectedBook,
+          this.settings,
+          (msg) => progressModal.setStatus(msg),
+        );
+
+        // 5. Duplicate check
+        const { action, file: existingFile } =
+          await this.checkForDuplicate(enrichedBook);
+        if (action === DuplicateAction.CANCEL) {
+          progressModal.close();
+          return;
+        }
+        if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
+          progressModal.markDone("Opening existing note...");
+          await this.openNewBookNote(existingFile);
+          return;
+        }
+
+        // 6. Create note
+        const targetFile = await this.noteCreator.create(enrichedBook);
+
+        const sourcesSummary =
+          sources.length > 1 ? `Data from: ${sources.join(", ")}` : "";
+        progressModal.markDone(
+          sourcesSummary ? `Note created. ${sourcesSummary}` : "Note created.",
+        );
+        await this.openNewBookNote(targetFile);
+      } catch (err) {
+        progressModal.markError(
+          err instanceof Error ? err.message : "An error occurred.",
+        );
+        throw err;
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message !== "Cancelled request") {
+        console.warn(err);
+        this.showNotice(err);
+      }
+    }
   }
 
   selectServiceAndSearch(event?: MouseEvent) {

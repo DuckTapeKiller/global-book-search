@@ -12,75 +12,107 @@ export class ServiceSelectionModal extends Modal {
     // Add custom class for styling
     this.modalEl.addClass("book-search-service-selection-modal");
 
-    contentEl.createEl("h2", { text: "Select Service" });
-
-    const services = [
-      { label: "Goodreads", value: "goodreads" },
-      { label: "Calibre", value: "calibre" },
-      { label: "OpenLibrary", value: "openlibrary" },
-      { label: "StoryGraph", value: "storygraph" },
-      { label: "Google Books", value: "google" },
-    ];
+    contentEl.createEl("h2", { text: "Search Books" });
 
     const buttonContainer = contentEl.createDiv({
       cls: "service-selection-buttons",
     });
 
-    services.forEach((service) => {
-      const btn = buttonContainer.createEl("button", {
-        text: service.label,
-        cls: "mod-cta",
-      });
+    // 1. Global Search (Always)
+    const globalBtn = buttonContainer.createEl("button", {
+      text: "Global Search",
+      cls: "mod-cta book-search-global-btn",
+    });
 
-      btn.addEventListener("click", async () => {
-        // Platform-specific behavior to avoid "Lingering" on Desktop
-        // but keep "Smooth Transition" on Mobile.
-        if (Platform.isDesktop) {
-          this.close();
+    globalBtn.addEventListener("click", async () => {
+      if (Platform.isDesktop) {
+        this.close();
+        this.plugin.createNewBookNoteGlobal().catch((err) => console.warn(err));
+        return;
+      }
+      const closePromise = this.animateClose();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      try {
+        await this.plugin.createNewBookNoteGlobal();
+      } catch (err) {
+        if ((err as Error).message !== "Cancelled request") console.warn(err);
+      } finally {
+        await closePromise;
+        this.close();
+      }
+    });
 
-          // Use multi-select for Calibre
-          if (service.value === "calibre") {
-            this.plugin
-              .createMultipleCalibreNotes()
-              .catch((err) => console.warn(err));
-          } else {
+    // 2. Calibre (Always)
+    const calibreBtn = buttonContainer.createEl("button", {
+      text: "Calibre",
+      cls: "mod-cta",
+    });
+
+    calibreBtn.addEventListener("click", async () => {
+      if (Platform.isDesktop) {
+        this.close();
+        this.plugin
+          .createMultipleCalibreNotes()
+          .catch((err) => console.warn(err));
+        return;
+      }
+      const closePromise = this.animateClose();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      try {
+        await this.plugin.createMultipleCalibreNotes();
+      } catch (err) {
+        if ((err as Error).message !== "Cancelled request") console.warn(err);
+      } finally {
+        await closePromise;
+        this.close();
+      }
+    });
+
+    // 3. Individual services (Conditional)
+    if (this.plugin.settings.showIndividualServiceButtons) {
+      const services = [
+        { label: "Goodreads", value: "goodreads" },
+        { label: "OpenLibrary", value: "openlibrary" },
+        { label: "StoryGraph", value: "storygraph" },
+        { label: "Google Books", value: "google" },
+      ];
+
+      services.forEach((service) => {
+        const btn = buttonContainer.createEl("button", {
+          text: service.label,
+          cls: "mod-cta",
+        });
+
+        btn.addEventListener("click", async () => {
+          if (Platform.isDesktop) {
+            this.close();
             this.plugin
               .createNewBookNote(service.value)
               .catch((err) => console.warn(err));
+            return;
           }
-          return;
-        }
 
-        // Mobile Logic: Persistent Backdrop & Smooth Animation
-        // 1. Start slide-down animation
-        const closePromise = this.animateClose();
+          const closePromise = this.animateClose();
+          await new Promise((resolve) => setTimeout(resolve, 50));
 
-        // 2. Wait a tiny bit to let animation start smoothly
-        await new Promise((resolve) => setTimeout(resolve, 50));
-
-        // 3. Trigger next modal overlapping with animation
-        try {
-          await new Promise<void>((resolve, reject) => {
-            setTimeout(() => {
-              // Use multi-select for Calibre
-              const action =
-                service.value === "calibre"
-                  ? this.plugin.createMultipleCalibreNotes()
-                  : this.plugin.createNewBookNote(service.value);
-
-              action.then(resolve).catch(reject);
-            }, 10);
-          });
-        } catch (err) {
-          if (err.message !== "Cancelled request") {
-            console.warn(err);
+          try {
+            await new Promise<void>((resolve, reject) => {
+              setTimeout(() => {
+                const action = this.plugin.createNewBookNote(service.value);
+                action.then(resolve).catch(reject);
+              }, 10);
+            });
+          } catch (err) {
+            if (err.message !== "Cancelled request") {
+              console.warn(err);
+            }
+          } finally {
+            await closePromise;
+            this.close();
           }
-        } finally {
-          await closePromise;
-          this.close();
-        }
+        });
       });
-    });
+    }
   }
 
   // Graceful close animation - Visual only

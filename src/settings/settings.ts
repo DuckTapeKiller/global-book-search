@@ -42,6 +42,7 @@ export interface BookSearchPluginSettings {
   maxSearchHistory: number; // How many to keep
   enableSeriesLinking: boolean; // Add series links automatically
   showTemplatePreview: boolean; // Preview note before creation
+  showIndividualServiceButtons: boolean; // Show all providers in selection modal
 }
 
 export const FRONTMATTER_TEMPLATES = {
@@ -293,6 +294,7 @@ export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
   maxSearchHistory: 10,
   enableSeriesLinking: true,
   showTemplatePreview: false,
+  showIndividualServiceButtons: false,
 };
 
 export class BookSearchSettingTab extends PluginSettingTab {
@@ -767,6 +769,23 @@ export class BookSearchSettingTab extends PluginSettingTab {
       );
   }
 
+  private createShowIndividualServiceButtonsSetting(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Show individual service buttons")
+      .setDesc(
+        "Show Goodreads, Google Books, OpenLibrary, and StoryGraph as separate buttons " +
+          "in the search modal. When off, only Global Search and Calibre are shown.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showIndividualServiceButtons)
+          .onChange(async (value) => {
+            this.plugin.settings.showIndividualServiceButtons = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+  }
+
   private toggleServiceProviderExtraSettings(
     serviceProvider: ServiceProvider = this.plugin.settings?.serviceProvider,
   ) {
@@ -913,6 +932,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
     this.createEnableSeriesLinkingSetting(containerEl);
     this.createSearchHistorySizeSetting(containerEl);
     this.createClearSearchHistorySetting(containerEl);
+    this.createShowIndividualServiceButtonsSetting(containerEl);
 
     // Initialize visibility
     this.toggleServiceProviderExtraSettings();
