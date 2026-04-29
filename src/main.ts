@@ -24,12 +24,35 @@ import {
 import { GlobalSearchModal } from "@views/global_search_modal";
 import { GlobalSuggestModal } from "@views/global_suggest_modal";
 import { EnrichmentProgressModal } from "@views/enrichment_progress_modal";
+import { EditionPickerModal } from "@views/edition_picker_modal";
+import { ConflictResolverModal } from "@views/conflict_resolver_modal";
 import { enrichBookByISBN, BookWithSource } from "@apis/global_search";
+import { VaultIndexEntry, BookEdition } from "@models/accuracy.model";
 
 export default class BookSearchPlugin extends Plugin {
   settings: BookSearchPluginSettings;
 
   private noteCreator: BookNoteCreator;
+
+  public getVaultIndex(): VaultIndexEntry[] {
+    const index: VaultIndexEntry[] = [];
+    const files = this.app.vault.getMarkdownFiles();
+    for (const file of files) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache?.frontmatter) {
+        const isbn13 = cache.frontmatter.isbn13;
+        const isbn10 = cache.frontmatter.isbn10;
+        if (isbn13 || isbn10) {
+          index.push({
+            path: file.path,
+            isbn13: String(isbn13 || ""),
+            isbn10: String(isbn10 || ""),
+          });
+        }
+      }
+    }
+    return index;
+  }
 
   async onload() {
     await this.loadSettings();
@@ -353,11 +376,31 @@ export default class BookSearchPlugin extends Plugin {
             _sourceLabels: ["Calibre"],
           } as BookWithSource;
 
-          const { book: enrichedBook, sources } = await enrichBookByISBN(
+          const enrichmentResult = await enrichBookByISBN(
             bookWithSource,
             this.settings,
             (msg) => progressModal.setStatus(msg),
           );
+
+          let enrichedBook = enrichmentResult.book;
+
+          // 6. Conflict resolution
+          if (enrichmentResult.conflicts.length > 0) {
+            progressModal.setStatus("Resolving data conflicts...");
+            const resolved = await new Promise<Book | null>((resolve) => {
+              new ConflictResolverModal(this.app, enrichmentResult, (result) =>
+                resolve(result),
+              ).open();
+            });
+
+            if (resolved === null) {
+              // User dismissed — cancel this book, move to next
+              progressModal.close();
+              continue;
+            }
+
+            enrichedBook = resolved;
+          }
 
           const { action, file: existingFile } =
             await this.checkForDuplicate(enrichedBook);
@@ -376,7 +419,9 @@ export default class BookSearchPlugin extends Plugin {
           const targetFile = await this.noteCreator.create(enrichedBook);
 
           const sourcesSummary =
-            sources.length > 1 ? `Data from: ${sources.join(", ")}` : "";
+            enrichmentResult.sources.length > 1
+              ? `Data from: ${enrichmentResult.sources.join(", ")}`
+              : "";
           progressModal.markDone(
             sourcesSummary
               ? `Note created. ${sourcesSummary}`
@@ -609,36 +654,82 @@ export default class BookSearchPlugin extends Plugin {
         },
       );
 
-      // 3. Open progress modal
+      // 3. Handle multiple editions (ISBNs)
+      let finalTargetBook: BookWithSource = selectedBook;
+      if (selectedBook._editions && selectedBook._editions.length > 1) {
+        const chosenEdition = await new Promise<BookEdition>((resolve) => {
+          new EditionPickerModal(
+            this.app,
+            selectedBook.title,
+            selectedBook._editions!,
+            (edition) => resolve(edition),
+          ).open();
+        });
+        finalTargetBook = { ...selectedBook, ...chosenEdition };
+      }
+
+      // 4. Open progress modal
       const progressModal = new EnrichmentProgressModal(this.app);
       progressModal.open();
 
       try {
-        // 4. Enrich by ISBN
-        const { book: enrichedBook, sources } = await enrichBookByISBN(
-          selectedBook,
+        // 5. Enrich by ISBN
+        const enrichmentResult = await enrichBookByISBN(
+          finalTargetBook,
           this.settings,
           (msg) => progressModal.setStatus(msg),
         );
 
-        // 5. Duplicate check
+        let enrichedBook = enrichmentResult.book;
+
+        // 6. Conflict resolution
+        if (enrichmentResult.conflicts.length > 0) {
+          progressModal.setStatus("Resolving data conflicts...");
+          const resolved = await new Promise<Book | null>((resolve) => {
+            new ConflictResolverModal(this.app, enrichmentResult, (result) =>
+              resolve(result),
+            ).open();
+          });
+
+          if (resolved === null) {
+            // User dismissed — cancel the whole operation
+            progressModal.close();
+            return;
+          }
+
+          enrichedBook = resolved;
+        }
+
+        // 7. Duplicate check
         const { action, file: existingFile } =
           await this.checkForDuplicate(enrichedBook);
+
         if (action === DuplicateAction.CANCEL) {
           progressModal.close();
           return;
         }
+
         if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
           progressModal.markDone("Opening existing note...");
           await this.openNewBookNote(existingFile);
           return;
         }
 
-        // 6. Create note
+        if (action === DuplicateAction.UPDATE_METADATA && existingFile) {
+          progressModal.setStatus("Updating existing metadata...");
+          await this.noteCreator.updateMetadata(existingFile, enrichedBook);
+          progressModal.markDone("Metadata updated successfully.");
+          await this.openNewBookNote(existingFile);
+          return;
+        }
+
+        // 8. Create note
         const targetFile = await this.noteCreator.create(enrichedBook);
 
         const sourcesSummary =
-          sources.length > 1 ? `Data from: ${sources.join(", ")}` : "";
+          enrichmentResult.sources.length > 1
+            ? `Data from: ${enrichmentResult.sources.join(", ")}`
+            : "";
         progressModal.markDone(
           sourcesSummary ? `Note created. ${sourcesSummary}` : "Note created.",
         );

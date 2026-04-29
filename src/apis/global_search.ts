@@ -8,9 +8,18 @@ import { OpenLibraryApi } from "@apis/open_library_api";
 import { GoodreadsApi } from "@apis/goodreads_api";
 import { StoryGraphApi } from "@apis/storygraph_api";
 
+import {
+  BookEdition,
+  EnrichmentResult,
+  FieldConflict,
+  VaultIndexEntry,
+} from "@models/accuracy.model";
+
 export interface BookWithSource extends Book {
   _sourceLabels: string[]; // Human-readable: ["Goodreads", "StoryGraph"]
   _sourceIds: string[]; // Machine: ["goodreads", "storygraph"]
+  _editions?: BookEdition[]; // Multiple editions found during search
+  _isInVault?: boolean;
 }
 
 const PROVIDER_ORDER = ["goodreads", "google", "openlibrary", "storygraph"];
@@ -196,7 +205,11 @@ async function fetchLocData(
 export async function globalSearch(
   query: string,
   settings: BookSearchPluginSettings,
-  options?: { locale?: string; includeCalibre?: boolean },
+  options?: {
+    locale?: string;
+    includeCalibre?: boolean;
+    vaultIndex?: VaultIndexEntry[];
+  },
   onProgress?: (message: string) => void,
 ): Promise<BookWithSource[]> {
   const providers = [...PROVIDER_ORDER];
@@ -241,21 +254,20 @@ export async function globalSearch(
     }
   });
 
-  // Deduplicate: same normalized title + normalized author
-  // Now merging source information instead of discarding
-  const seenMap = new Map<string, BookWithSource>();
+  // Deduplicate and Group by "Work" (Title + Author)
+  const workMap = new Map<string, BookWithSource>();
 
   const normalize = (str: string): string =>
     (str || "")
       .toLowerCase()
       .trim()
-      .normalize("NFD") // decompose accented characters
-      .replace(/[\u0300-\u036f]/g, "") // strip combining diacritical marks
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/\s+/g, " ");
 
   combinedResults.forEach((book) => {
     const key = `${normalize(book.title)}|${normalize(book.author)}`;
-    const existing = seenMap.get(key);
+    const existing = workMap.get(key);
 
     if (existing) {
       // Merge source info
@@ -268,22 +280,69 @@ export async function globalSearch(
           }
         }
       });
-      // Merge identifiers if missing
-      if (!existing.isbn13 && book.isbn13) existing.isbn13 = book.isbn13;
-      if (!existing.isbn10 && book.isbn10) existing.isbn10 = book.isbn10;
+
+      // Track distinct editions (different ISBNs)
+      if (book.isbn13 || book.isbn10) {
+        if (!existing._editions) existing._editions = [];
+        const isNewEdition = !existing._editions.some(
+          (e) =>
+            (e.isbn13 && e.isbn13 === book.isbn13) ||
+            (e.isbn10 && e.isbn10 === book.isbn10),
+        );
+        if (isNewEdition) {
+          existing._editions.push({
+            ...book,
+            _providerId: book._sourceIds[0],
+          } as BookEdition);
+        }
+      }
     } else {
-      seenMap.set(key, { ...book });
+      const newWork = { ...book, _editions: [] };
+      if (book.isbn13 || book.isbn10) {
+        newWork._editions.push({
+          ...book,
+          _providerId: book._sourceIds[0],
+        } as BookEdition);
+      }
+      workMap.set(key, newWork);
     }
   });
 
-  return Array.from(seenMap.values());
+  const finalResults = Array.from(workMap.values());
+
+  // Mark "In Vault" status
+  if (options?.vaultIndex) {
+    finalResults.forEach((work) => {
+      const editions = work._editions || [];
+      const isAnyEditionInVault = editions.some((ed) =>
+        options.vaultIndex?.some(
+          (v) =>
+            (ed.isbn13 && ed.isbn13 === v.isbn13) ||
+            (ed.isbn10 && ed.isbn10 === v.isbn10),
+        ),
+      );
+      if (isAnyEditionInVault) {
+        work._isInVault = true;
+      }
+    });
+  }
+
+  return finalResults;
+}
+
+function upgradeGoogleCover(url: string): string {
+  if (!url) return url;
+  if (url.includes("books.google.com") && url.includes("zoom=1")) {
+    return url.replace("zoom=1", "zoom=3");
+  }
+  return url;
 }
 
 export async function enrichBookByISBN(
   primaryBook: BookWithSource,
   settings: BookSearchPluginSettings,
   onProgress?: (message: string) => void,
-): Promise<{ book: Book; sources: string[] }> {
+): Promise<EnrichmentResult> {
   const sourceIds = primaryBook._sourceIds || [];
   const primarySourceId = sourceIds[0] || "";
   const primarySourceLabel = primaryBook._sourceLabels[0] || "";
@@ -343,7 +402,7 @@ export async function enrichBookByISBN(
 
   if (!isbn) {
     onProgress?.("No ISBN found — using primary source data only.");
-    return { book, sources: [primarySourceLabel] };
+    return { book, sources: [primarySourceLabel], conflicts: [] };
   }
 
   // ── Step 3: Goodreads enrichment by ISBN ──────────────────────────────────
@@ -449,14 +508,14 @@ export async function enrichBookByISBN(
       ],
     }));
 
-  // ── Step 5: Merge ──────────────────────────────────────────────────────────
-  const { merged: mergedBook, contributingSources } = mergeBooks(
-    book,
-    goodreadsData,
-    secondaries,
-  );
+  // ── Step 5: Merge with Conflict Tracking ───────────────────────────────────
+  const {
+    merged: mergedBook,
+    contributingSources,
+    conflicts,
+  } = mergeWithConflicts(book, goodreadsData, secondaries);
 
-  // ── Step 6: Fable passive enrichment ──────────────────────────────────────
+  // ── Step 6: Fable passive enrichment (with cover upgrade) ──────────────────
   const needsDescription = !mergedBook.description;
   const needsCover = !mergedBook.coverUrl;
 
@@ -475,6 +534,11 @@ export async function enrichBookByISBN(
         }
       }
     }
+  }
+
+  // Upgrade Google cover if it's the only one we have
+  if (mergedBook.coverUrl?.includes("books.google.com")) {
+    mergedBook.coverUrl = upgradeGoogleCover(mergedBook.coverUrl);
   }
 
   // ── Step 7: Library of Congress passive enrichment ────────────────────────
@@ -527,127 +591,128 @@ export async function enrichBookByISBN(
   return {
     book: mergedBook,
     sources: [...new Set([primarySourceLabel, ...contributingSources])],
+    conflicts,
   };
 }
 
-function mergeBooks(
+function mergeWithConflicts(
   primary: Book,
   goodreads: Book | null,
   secondaries: BookWithSource[],
-): { merged: Book; contributingSources: string[] } {
+): { merged: Book; contributingSources: string[]; conflicts: FieldConflict[] } {
   const contributingSources = new Set<string>();
-
-  // Start with primary data as the base
   const result: Book = { ...primary };
+  const conflicts: FieldConflict[] = [];
 
-  // Fields that must NEVER change regardless of any source.
-  // These preserve the identity of the record the user selected.
-  const hardImmutable: (keyof Book)[] = [
-    "link",
-    "previewLink",
-    "sourceProvider",
+  const fieldsToTrack: { name: keyof Book; label: string }[] = [
+    { name: "title", label: "Title" },
+    { name: "author", label: "Author" },
+    { name: "publisher", label: "Publisher" },
+    { name: "publishDate", label: "Publish Date" },
+    { name: "totalPage", label: "Page Count" },
+    { name: "categories", label: "Categories" },
   ];
 
-  // ── Apply Goodreads data (highest priority) ───────────────────────────────
-  // Goodreads wins on every field where it has a non-falsy value,
-  // INCLUDING title, author, authors, and coverUrl.
+  fieldsToTrack.forEach((field) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allValues: { value: any; source: string }[] = [];
+
+    // Add primary source value
+    if (primary[field.name]) {
+      allValues.push({
+        value: primary[field.name],
+        source:
+          (primary as BookWithSource)._sourceLabels?.[0] || "Primary Source",
+      });
+    }
+
+    // Add Goodreads value
+    if (goodreads && goodreads[field.name]) {
+      allValues.push({ value: goodreads[field.name], source: "Goodreads" });
+    }
+
+    // Add secondary values
+    secondaries.forEach((sec) => {
+      if (sec[field.name]) {
+        allValues.push({
+          value: sec[field.name],
+          source: sec._sourceLabels?.[0] || "Secondary Source",
+        });
+      }
+    });
+
+    if (allValues.length > 1) {
+      // Check for conflict
+      const distinctValues = [
+        ...new Set(allValues.map((v) => String(v.value).toLowerCase().trim())),
+      ];
+
+      if (distinctValues.length > 1) {
+        // We have a conflict!
+        const quorumValue = getQuorumValue(allValues.map((v) => v.value));
+        conflicts.push({
+          fieldName: field.name as string,
+          label: field.label,
+          values: allValues.map((v) => ({
+            ...v,
+            isQuorum:
+              String(v.value).toLowerCase().trim() ===
+              String(quorumValue).toLowerCase().trim(),
+          })),
+          currentBestValue: quorumValue,
+        });
+      }
+    }
+  });
+
+  // Now perform the actual merge (Goodreads still wins by default if present)
   if (goodreads) {
-    const grLabel = "Goodreads";
-    let grContributed = false;
-
-    (Object.keys(goodreads) as (keyof Book)[]).forEach((field) => {
-      if (hardImmutable.includes(field)) return;
-
-      const grValue = goodreads[field];
-      if (!grValue) return; // Goodreads has nothing for this field
-
-      if (field === "tags") {
-        // Merge tags
-        const merged = [
-          ...new Set([...(result.tags || []), ...(goodreads.tags || [])]),
-        ];
-        if (merged.length > (result.tags || []).length) {
-          result.tags = merged;
-          grContributed = true;
-        }
-        return;
-      }
-
-      if (field === "totalPage") {
-        const existing = parseInt(String(result.totalPage || 0), 10);
-        const grPages = parseInt(String(grValue), 10);
-        if (grPages > 0) {
-          // Goodreads wins even if existing has a value — it's the authority
-          result.totalPage = grPages > existing ? grPages : existing;
-          grContributed = true;
-        }
-        return;
-      }
-
-      // For all other fields: Goodreads wins unconditionally
+    contributingSources.add("Goodreads");
+    Object.keys(goodreads).forEach((field) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (result as any)[field] = grValue;
-      grContributed = true;
-    });
-
-    if (grContributed) contributingSources.add(grLabel);
-  }
-
-  // ── Apply secondary data (fill remaining gaps only) ───────────────────────
-  // Secondary sources only fill fields that are STILL empty after
-  // Goodreads has had its say. They never overwrite Goodreads data.
-  for (const secondary of secondaries) {
-    const secLabels = (secondary as BookWithSource)._sourceLabels || [];
-    const secIds = (secondary as BookWithSource)._sourceIds || [];
-    const secLabel =
-      secLabels[0] || GLOBAL_SEARCH_SOURCE_LABELS[secIds[0] || ""] || "Unknown";
-
-    (Object.keys(secondary) as (keyof Book)[]).forEach((field) => {
-      if (hardImmutable.includes(field)) return;
-
-      const secValue = secondary[field];
-      if (!secValue) return;
-
-      if (field === "tags") {
-        const before = (result.tags || []).length;
-        result.tags = [
-          ...new Set([...(result.tags || []), ...(secondary.tags || [])]),
-        ];
-        if (result.tags.length > before) contributingSources.add(secLabel);
-        return;
-      }
-
-      if (field === "totalPage") {
-        const existing = parseInt(String(result.totalPage || 0), 10);
-        const secPages = parseInt(String(secValue), 10);
-        if (secPages > existing) {
-          result.totalPage = secPages;
-          contributingSources.add(secLabel);
-        }
-        return;
-      }
-
-      if (field === "coverUrl") {
-        // Secondaries never overwrite coverUrl — Goodreads already set it
-        // if it had one, and Fable handles the empty fallback case later
-        if (!result.coverUrl) {
-          result.coverUrl = secValue as string;
-          contributingSources.add(secLabel);
-        }
-        return;
-      }
-
-      // Generic: only fill if still empty
-      if (!result[field]) {
+      const val = (goodreads as any)[field];
+      if (val && field !== "link" && field !== "previewLink") {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (result as any)[field] = secValue;
-        contributingSources.add(secLabel);
+        (result as any)[field] = val;
       }
     });
   }
+
+  secondaries.forEach((sec) => {
+    Object.keys(sec).forEach((field) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!(result as any)[field] && (sec as any)[field]) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (result as any)[field] = (sec as any)[field];
+        contributingSources.add(sec._sourceLabels[0]);
+      }
+    });
+  });
 
   return {
     merged: result,
     contributingSources: Array.from(contributingSources),
+    conflicts,
   };
+}
+
+function getQuorumValue<T>(values: T[]): T | undefined {
+  if (values.length === 0) return undefined;
+  const counts = new Map<string, number>();
+  values.forEach((v) => {
+    const s = String(v).toLowerCase().trim();
+    if (s) counts.set(s, (counts.get(s) || 0) + 1);
+  });
+  let maxCount = 0;
+  let quorumValue = values[0];
+  counts.forEach((count, valStr) => {
+    if (count > maxCount) {
+      maxCount = count;
+      // Find the original value that matches this string
+      quorumValue = values.find(
+        (v) => String(v).toLowerCase().trim() === valStr,
+      );
+    }
+  });
+  return quorumValue;
 }

@@ -2,6 +2,7 @@ import { App, Modal, Setting, TFile } from "obsidian";
 
 export enum DuplicateAction {
   OPEN_EXISTING = "open",
+  UPDATE_METADATA = "update",
   CREATE_ANYWAY = "create",
   CANCEL = "cancel",
 }
@@ -42,6 +43,15 @@ export class DuplicateCheckModal extends Modal {
     });
     openBtn.addEventListener("click", () => {
       this.result = DuplicateAction.OPEN_EXISTING;
+      this.close();
+    });
+
+    // Update Metadata button
+    const updateBtn = buttonContainer.createEl("button", {
+      text: "Update Metadata",
+    });
+    updateBtn.addEventListener("click", () => {
+      this.result = DuplicateAction.UPDATE_METADATA;
       this.close();
     });
 

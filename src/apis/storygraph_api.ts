@@ -337,15 +337,13 @@ export class StoryGraphApi implements BaseBooksApiImpl {
     // ISBN from entire pane text
     if (!isbn13 && !isbn10) {
       const paneText = pane.text();
-      const isbnMatches = paneText.match(/\b(?:97[89])?\d{9}[\dX]\b/g);
+      const isbnMatches = paneText.match(/\b97[89]\d{10}\b/g);
       if (isbnMatches) {
         for (const m of isbnMatches) {
-          const digits = m.replace(/[^0-9X]/gi, "");
+          const digits = m.replace(/[^0-9]/g, "");
           if (digits.length === 13) {
             isbn13 = digits;
             break;
-          } else if (digits.length === 10 && !isbn10) {
-            isbn10 = digits;
           }
         }
       }

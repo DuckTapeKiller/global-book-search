@@ -98,7 +98,10 @@ export class GlobalSearchModal extends Modal {
       const results = await globalSearch(
         this.query,
         this.plugin.settings,
-        { locale: this.plugin.settings.localePreference },
+        {
+          locale: this.plugin.settings.localePreference,
+          vaultIndex: this.plugin.getVaultIndex(),
+        },
         (msg) => {
           if (this.statusEl) this.statusEl.setText(msg);
         },

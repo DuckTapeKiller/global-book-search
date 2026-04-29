@@ -40,7 +40,46 @@ export class BookNoteCreator {
   }
 
   async getRenderedContents(book: Book): Promise<string> {
-    let { frontmatter, content } = this.settings;
+    const resolvedFrontmatter = await this.getResolvedFrontmatter(book);
+    const cleanFrontmatter = toStringFrontMatter(resolvedFrontmatter);
+
+    let content = this.settings.content;
+    if (this.settings.templateFile) {
+      const templateContent = await getTemplateContents(
+        this.app,
+        this.settings.templateFile,
+      );
+      if (templateContent) {
+        const transformedTemplate =
+          applyTemplateTransformations(templateContent);
+        const splitContent = transformedTemplate.split("---");
+        if (splitContent.length >= 3) {
+          content = splitContent.slice(2).join("---");
+        } else {
+          content = transformedTemplate;
+        }
+      }
+    }
+
+    const replacedVariableContent = replaceVariableSyntax(book, content);
+
+    const fullContent = cleanFrontmatter
+      ? `---\n${cleanFrontmatter}\n---\n${replacedVariableContent}`
+      : replacedVariableContent;
+
+    // Apply inline scripts templates <% %>
+    return executeInlineScriptsTemplates(book, fullContent);
+  }
+
+  async updateMetadata(file: TFile, book: Book): Promise<void> {
+    const resolvedFrontmatter = await this.getResolvedFrontmatter(book);
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      Object.assign(fm, resolvedFrontmatter);
+    });
+  }
+
+  async getResolvedFrontmatter(book: Book): Promise<Record<string, unknown>> {
+    let { frontmatter } = this.settings;
 
     // Generate tags automatically
     book.tags = createBookTags(
@@ -68,16 +107,11 @@ export class BookNoteCreator {
         this.settings.templateFile,
       );
       if (templateContent) {
-        // Handle Date/Time variables in the template
         const transformedTemplate =
           applyTemplateTransformations(templateContent);
-
         const splitContent = transformedTemplate.split("---");
         if (splitContent.length >= 3) {
           frontmatter = splitContent[1];
-          content = splitContent.slice(2).join("---");
-        } else {
-          content = transformedTemplate;
         }
       }
     }
@@ -95,9 +129,7 @@ export class BookNoteCreator {
       );
     }
 
-    // 1. Replace variables in each value of the frontmatter object first
-    // This allows the quoting logic to see the actual book data (description, etc.)
-    const resolvedFrontmatter = {};
+    const resolvedFrontmatter: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(formattedFrontmatter)) {
       if (typeof value === "string") {
         resolvedFrontmatter[key] = replaceVariableSyntax(book, value);
@@ -109,17 +141,7 @@ export class BookNoteCreator {
         resolvedFrontmatter[key] = value;
       }
     }
-
-    // 2. Now stringify the resolved frontmatter (this applies the guillemet logic)
-    const cleanFrontmatter = toStringFrontMatter(resolvedFrontmatter);
-    const replacedVariableContent = replaceVariableSyntax(book, content);
-
-    const fullContent = cleanFrontmatter
-      ? `---\n${cleanFrontmatter}\n---\n${replacedVariableContent}`
-      : replacedVariableContent;
-
-    // Apply inline scripts templates <% %>
-    return executeInlineScriptsTemplates(book, fullContent);
+    return resolvedFrontmatter;
   }
 
   private async downloadAndSaveImage(

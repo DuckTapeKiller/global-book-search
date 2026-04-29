@@ -57,6 +57,21 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
     });
 
     const sourceContainer = textInfo.createDiv({ cls: "book-source-badges" });
+
+    if (book._isInVault) {
+      sourceContainer.createSpan({
+        cls: "book-search-plugin__badge vault-badge",
+        text: "In Vault",
+      });
+    }
+
+    if (book._editions && book._editions.length > 1) {
+      sourceContainer.createSpan({
+        cls: "book-search-plugin__badge editions-badge",
+        text: `${book._editions.length} Editions`,
+      });
+    }
+
     book._sourceIds.forEach((id, index) => {
       const label = book._sourceLabels[index] || id;
       sourceContainer.createEl("span", {

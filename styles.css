@@ -867,11 +867,6 @@ body.is-mobile .modal.calibre-browse-modal {
   border: none;
 }
 
-.book-source-badge--loc {
-  background: linear-gradient(135deg, #1a3a6b 0%, #0d2142 100%);
-  color: #ffffff !important;
-  border: none;
-}
 
 /* =============================================
    Global Search button in service modal
@@ -1017,4 +1012,159 @@ body.is-mobile .modal.book-search-global-modal input[type="text"] {
   background-color: #1a3a6b22;
   color: #1a3a6b;
   border: 1px solid #1a3a6b44;
+}
+
+/* Accuracy Suite Modals */
+.book-search-accuracy-modal {
+  width: 500px !important;
+  max-width: 90vw;
+}
+
+.modal-description {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin-bottom: 20px;
+}
+
+/* Edition Picker */
+.edition-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.edition-item-card {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: border-color 0.2s ease;
+}
+
+.edition-item-card:hover {
+  border-color: var(--interactive-accent);
+}
+
+.edition-info {
+  flex: 1;
+}
+
+.edition-meta {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.edition-source-tag {
+  font-size: 0.75em;
+  color: var(--interactive-accent);
+  text-transform: uppercase;
+  font-weight: bold;
+  margin-top: 6px;
+}
+
+/* Conflict Resolver */
+.conflict-scroll-area {
+  max-height: 500px;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.conflict-field-group {
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 16px;
+}
+
+.conflict-field-group:last-child {
+  border-bottom: none;
+}
+
+.field-label {
+  margin: 0 0 12px 0;
+  color: var(--text-normal);
+}
+
+.conflict-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.conflict-option-card {
+  position: relative;
+  background-color: var(--background-secondary);
+  border: 2px solid transparent;
+  border-radius: var(--radius-s);
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.conflict-option-card.is-selected {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-primary-alt);
+}
+
+.conflict-option-card input[type="radio"] {
+  display: none;
+}
+
+.value-text {
+  font-weight: 500;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.source-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75em;
+}
+
+.source-name {
+  color: var(--text-muted);
+}
+
+.quorum-tag {
+  background-color: #fbbf24;
+  color: #000000 !important;
+  padding: 3px 8px;
+  border-radius: var(--radius-s);
+  font-size: 0.85em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Badges */
+.book-search-plugin__badge {
+  font-size: 0.7em;
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+  font-weight: bold;
+  margin-right: 6px;
+  text-transform: uppercase;
+}
+
+.vault-badge {
+  background-color: var(--text-success);
+  color: white;
+}
+
+.editions-badge {
+  background-color: var(--interactive-accent);
+  color: white;
+}
+
+.modal-footer {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
 }
