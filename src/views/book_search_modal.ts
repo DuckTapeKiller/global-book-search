@@ -39,6 +39,11 @@ export class BookSearchModal extends Modal {
 
   setBusy(busy: boolean): void {
     this.isBusy = busy;
+    if (busy) {
+      this.modalEl.addClass("is-searching");
+    } else {
+      this.modalEl.removeClass("is-searching");
+    }
     this.okBtnRef
       ?.setDisabled(busy)
       .setButtonText(

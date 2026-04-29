@@ -349,8 +349,8 @@ export default class BookSearchPlugin extends Plugin {
 
           const bookWithSource = {
             ...book,
-            _sourceId: "calibre",
-            _sourceLabel: "Calibre",
+            _sourceIds: ["calibre"],
+            _sourceLabels: ["Calibre"],
           } as BookWithSource;
 
           const { book: enrichedBook, sources } = await enrichBookByISBN(

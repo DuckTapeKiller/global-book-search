@@ -1,4 +1,4 @@
-import { Modal, Setting, Platform } from "obsidian";
+import { Modal, Setting, Platform, setIcon } from "obsidian";
 import BookSearchPlugin from "@src/main";
 
 export class ServiceSelectionModal extends Modal {
@@ -12,7 +12,19 @@ export class ServiceSelectionModal extends Modal {
     // Add custom class for styling
     this.modalEl.addClass("book-search-service-selection-modal");
 
-    contentEl.createEl("h2", { text: "Search Books" });
+    // Brand Header
+    const headerEl = contentEl.createDiv({
+      cls: "book-search-plugin__modal-header",
+    });
+    const iconEl = headerEl.createDiv({
+      cls: "book-search-plugin__modal-icon",
+    });
+    setIcon(iconEl, "library-big");
+
+    headerEl.createEl("h2", {
+      text: "Search Books",
+      cls: "book-search-plugin__modal-title",
+    });
 
     const buttonContainer = contentEl.createDiv({
       cls: "service-selection-buttons",

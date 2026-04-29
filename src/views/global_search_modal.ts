@@ -1,4 +1,4 @@
-import { Modal, Notice, Setting } from "obsidian";
+import { Modal, Notice, Setting, setIcon, Platform } from "obsidian";
 import BookSearchPlugin from "@src/main";
 import { globalSearch, BookWithSource } from "@apis/global_search";
 
@@ -21,30 +21,49 @@ export class GlobalSearchModal extends Modal {
     const { contentEl } = this;
     this.modalEl.addClass("book-search-global-modal");
 
-    contentEl.createEl("h2", { text: "Global Search" });
-    contentEl.createEl("p", {
-      text: "Goodreads · Google Books · OpenLibrary · StoryGraph",
-      cls: "book-search-global-subtitle",
+    // Brand Header
+    const headerEl = contentEl.createDiv({
+      cls: "book-search-plugin__modal-header",
+    });
+    const iconEl = headerEl.createDiv({
+      cls: "book-search-plugin__modal-icon",
+    });
+    setIcon(iconEl, "library-big");
+
+    headerEl.createEl("h2", {
+      text: "Global Search",
+      cls: "book-search-plugin__modal-title",
     });
 
-    const searchSetting = new Setting(contentEl)
-      .setName("Search")
-      .setDesc("Search by title, author, or ISBN")
-      .addText((text) => {
-        text
-          .setPlaceholder("Search by title, author, or ISBN")
-          .setValue(this.query)
-          .onChange((value) => (this.query = value));
-
-        text.inputEl.addEventListener("keydown", (event: KeyboardEvent) => {
-          if (event.key === "Enter" && !event.isComposing) {
-            void this.doSearch();
-          }
-        });
-
-        // Auto-focus
-        setTimeout(() => text.inputEl.focus(), 50);
+    if (!Platform.isMobile) {
+      contentEl.createEl("p", {
+        text: "Goodreads · Google Books · OpenLibrary · StoryGraph",
+        cls: "book-search-global-subtitle",
       });
+    }
+
+    const searchSetting = new Setting(contentEl);
+    if (!Platform.isMobile) {
+      searchSetting
+        .setName("Search")
+        .setDesc("Search by title, author, or ISBN");
+    }
+
+    searchSetting.addText((text) => {
+      text
+        .setPlaceholder("Search by title, author, or ISBN")
+        .setValue(this.query)
+        .onChange((value) => (this.query = value));
+
+      text.inputEl.addEventListener("keydown", (event: KeyboardEvent) => {
+        if (event.key === "Enter" && !event.isComposing) {
+          void this.doSearch();
+        }
+      });
+
+      // Auto-focus
+      setTimeout(() => text.inputEl.focus(), 50);
+    });
 
     this.statusEl = this.contentEl.createDiv({
       cls: "book-search-global-status",
@@ -67,6 +86,7 @@ export class GlobalSearchModal extends Modal {
     }
 
     this.isBusy = true;
+    this.modalEl.addClass("is-searching");
     const searchButton = this.contentEl.querySelector(
       "button.mod-cta",
     ) as HTMLButtonElement;
@@ -87,6 +107,7 @@ export class GlobalSearchModal extends Modal {
       if (results.length === 0) {
         new Notice("No results found.");
         this.isBusy = false;
+        this.modalEl.removeClass("is-searching");
         if (this.statusEl) this.statusEl.setText("");
         searchButton.textContent = originalText;
         searchButton.disabled = false;
@@ -104,6 +125,7 @@ export class GlobalSearchModal extends Modal {
       this.close();
     } finally {
       this.isBusy = false;
+      this.modalEl.removeClass("is-searching");
     }
   }
 

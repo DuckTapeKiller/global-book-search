@@ -1,14 +1,32 @@
+/* Design System & Animations */
+:root {
+  --bsp-gradient: linear-gradient(135deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
+  --bsp-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes bsp-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes bsp-fade-in-up {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .book-search-plugin__header {
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding-bottom: 8px;
+  border-bottom: 2px solid var(--interactive-accent);
+  padding-bottom: 12px;
   margin-top: 32px !important;
-  margin-bottom: 16px !important;
+  margin-bottom: 20px !important;
+  opacity: 0.9;
 }
 
 .book-search-plugin__header .setting-item-name {
-  font-size: 1.2em;
-  font-weight: 700;
+  font-size: 1.5em;
+  font-weight: 800;
   color: var(--interactive-accent);
+  margin-top: 8px;
 }
 
 .book-search-plugin__settings .setting-item {
@@ -17,11 +35,6 @@
 
 .book-search-plugin__settings .setting-item-info {
   flex: 1 1 auto;
-}
-
-.book-search-plugin__settings .setting-item-control {
-  flex: 2 1 auto;
-  justify-content: flex-end;
 }
 
 .book-search-plugin__settings--textarea {
@@ -65,35 +78,134 @@
 .book-suggestion-item {
   display: flex;
   align-items: center;
+  padding: 12px;
   margin-bottom: 10px;
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.book-suggestion-item:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+  transform: translateX(6px);
+  box-shadow: var(--bsp-shadow);
 }
 
 .book-cover-image {
-  max-width: 100px;
-  max-height: 100px;
-  margin-right: 10px;
+  width: 65px;
+  height: 95px;
+  margin-right: 16px;
   object-fit: cover;
-  border-radius: 3px;
+  border-radius: var(--radius-s);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  background-color: var(--background-secondary-alt);
+  flex-shrink: 0;
 }
 
 .book-text-info {
   flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.book-text-info strong {
+  font-size: 1.1em;
+  color: var(--text-accent);
+}
+
+.book-text-info span {
+  color: var(--text-muted);
+  font-size: 0.9em;
 }
 
 /* Service Selection Modal Styling */
-.modal.book-search-service-selection-modal {
-  /* Desktop Standard: Relaxed constraints to fit taller buttons */
-  width: 320px !important;
+.modal.book-search-service-selection-modal,
+.modal.book-search-input-modal,
+.modal.book-search-global-modal {
+  width: 340px !important;
   height: auto !important;
-  min-height: 250px !important;
   max-width: 90vw;
-  padding: 24px !important;
+  padding: 32px !important;
+  box-shadow: var(--bsp-shadow);
+  border: 1px solid var(--background-modifier-border-hover);
+  border-radius: var(--modal-radius) !important;
+  background-color: var(--background-primary-alt) !important;
+  animation: bsp-fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  position: relative;
+  overflow: visible !important;
+}
+
+/* Modal Progress Fill Effect */
+.modal.book-search-global-modal.is-searching::before,
+.modal.book-search-input-modal.is-searching::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 4px;
+  width: 100%;
+  background: linear-gradient(90deg, transparent, var(--interactive-accent), transparent);
+  background-size: 200% 100%;
+  animation: bsp-shimmer 2s infinite linear;
+  z-index: 100;
+}
+
+.modal.book-search-global-modal.is-searching {
+  border-top: 2px solid var(--interactive-accent);
+}
+
+.modal.book-search-global-modal .modal-close-button {
+  z-index: 9999 !important;
   display: flex !important;
-  flex-direction: column !important;
-  justify-content: center !important;
-  align-items: center !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  /* Inherit border-radius from theme */
+  opacity: 1 !important;
+  background-color: hsla(0, 0%, 50%, 0.1) !important; /* Subtle diagnostic circle */
+  border-radius: 50%;
+  padding: 4px;
+}
+
+.modal.book-search-global-modal .modal-close-button svg {
+  display: block !important;
+  color: var(--text-normal) !important;
+  width: 24px !important;
+  height: 24px !important;
+  overflow: visible !important;
+}
+
+.modal.book-search-global-modal .modal-close-button svg path {
+  stroke: var(--text-normal) !important;
+  stroke-width: 2px !important;
+  display: block !important;
+}
+
+/* Modal Branding Header */
+.book-search-plugin__modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.book-search-plugin__modal-icon {
+  color: var(--interactive-accent);
+  margin-bottom: 12px;
+}
+
+.book-search-plugin__modal-icon svg {
+  width: 48px;
+  height: 48px;
+  stroke-width: 1.5px;
+}
+
+.book-search-plugin__modal-title {
+  font-size: 1.5em !important;
+  font-weight: var(--font-bold) !important;
+  margin: 0 !important;
+  color: var(--text-accent);
+  letter-spacing: -0.01em;
 }
 
 /* Mobile Overrides: Bottom Sheet Style */
@@ -166,26 +278,25 @@ body.is-mobile .modal.book-search-service-selection-modal {
 }
 
 /* Button Styling - Clean Menu Look */
-.book-search-service-selection-modal .service-selection-buttons button {
+.book-search-service-selection-modal .service-selection-buttons button,
+.book-search-input-modal button.mod-cta,
+.book-search-global-modal button.mod-cta {
   width: 100%;
-  /* Full width */
   height: auto;
   padding: 12px 20px;
-  justify-content: center;
-  /* Or Flex-Start if we add icons later */
-  font-size: 1em;
-  font-weight: 500;
-  transition: all 0.2s ease;
+  /* Use theme font and radius */
+  font-family: inherit;
+  border-radius: var(--radius-m);
+  /* Let the theme's .mod-cta handle background and color */
   margin: 0;
-  /* Use Theme Colors/Radius */
-  /* Use Theme Colors/Radius by NOT overriding them. */
-  /* background-color, color, border removed to let .mod-cta from theme take over. */
-  box-shadow: none;
+  transition: all 0.2s ease;
 }
 
-.book-search-service-selection-modal .service-selection-buttons button:hover {
-  transform: none;
-  /* No movement on mobile */
+.book-search-service-selection-modal .service-selection-buttons button:hover,
+.book-search-input-modal button.mod-cta:hover,
+.book-search-global-modal button.mod-cta:hover {
+  /* Minimal hover change, strictly following theme behavior */
+  opacity: 0.9;
 }
 
 /* Search Modal Title Styling */
@@ -236,9 +347,35 @@ body.is-mobile .modal.book-search-global-modal {
   top: 70px !important;
   bottom: auto !important;
 
-  left: 50% !important;
-  transform: translateX(-50%) !important;
+  left: 5% !important;
+  right: 5% !important;
+  width: 90% !important;
+  transform: none !important;
   margin: 0 !important;
+  padding: 20px !important; /* Reduced from 32px */
+  animation: none !important; /* Rule out animation glitches */
+}
+
+body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-header {
+  margin-bottom: 8px; /* Reduced from 16px */
+}
+
+body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-icon {
+  margin-bottom: 4px; /* Reduced from 12px */
+}
+
+body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-icon svg {
+  width: 42px; /* Increased from 32px */
+  height: 42px;
+}
+
+body.is-mobile .modal.book-search-global-modal .setting-item {
+  border: none !important;
+  padding: 0 !important;
+}
+
+body.is-mobile .modal.book-search-global-modal .setting-item-control {
+  margin-top: 4px !important;
 }
 
 /* ============================================= */
@@ -648,14 +785,12 @@ body.is-mobile .book-search-global-modal .setting-item-control .search-input {
   max-width: 100% !important;
 }
 
-body.is-mobile .book-search-plugin__settings .setting-item,
 body.is-mobile .book-search-input-modal .setting-item,
 body.is-mobile .book-search-global-modal .setting-item {
   flex-direction: column;
   align-items: stretch;
 }
 
-body.is-mobile .book-search-plugin__settings .setting-item-control,
 body.is-mobile .book-search-input-modal .setting-item-control,
 body.is-mobile .book-search-global-modal .setting-item-control {
   width: 100%;
@@ -681,64 +816,61 @@ body.is-mobile .modal.calibre-browse-modal {
 .book-source-badge {
   display: inline-block;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--font-bold);
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-m); /* Respect theme radius */
   margin-top: 4px;
-  margin-right: 4px;
+  margin-right: 6px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  opacity: 1;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: transform 0.2s ease;
 }
 
-.theme-light .book-source-badge {
-  color: #000000 !important;
-}
-
-.theme-dark .book-source-badge {
-  color: #ffffff !important;
-}
-
-.book-source-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.book-source-badge:hover {
+  transform: translateY(-1px);
 }
 
 .book-source-badge--goodreads {
-  background-color: #3b2a1e22;
-  color: #c07a40;
-  border: 1px solid #c07a4044;
+  background: linear-gradient(135deg, #c07a40 0%, #8b5a2b 100%);
+  color: #ffffff !important;
+  border: none;
 }
 
 .book-source-badge--google {
-  background-color: #1a73e822;
-  color: #1a73e8;
-  border: 1px solid #1a73e844;
+  background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
+  color: #ffffff !important;
+  border: none;
 }
 
 .book-source-badge--openlibrary {
-  background-color: #e8511a22;
-  color: #c04010;
-  border: 1px solid #e8511a44;
+  background: linear-gradient(135deg, #e8511a 0%, #b03d14 100%);
+  color: #ffffff !important;
+  border: none;
 }
 
 .book-source-badge--storygraph {
-  background-color: #7c3aed22;
-  color: #7c3aed;
-  border: 1px solid #7c3aed44;
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: #ffffff !important;
+  border: none;
 }
 
 .book-source-badge--calibre {
-  background-color: #16a34a22;
-  color: #16a34a;
-  border: 1px solid #16a34a44;
+  background: linear-gradient(135deg, #16a34a 0%, #116e33 100%);
+  color: #ffffff !important;
+  border: none;
 }
 
 .book-source-badge--fable {
-  background-color: #0d766322;
-  color: #0d7663;
-  border: 1px solid #0d766344;
+  background: linear-gradient(135deg, #0d7663 0%, #064e42 100%);
+  color: #ffffff !important;
+  border: none;
+}
+
+.book-source-badge--loc {
+  background: linear-gradient(135deg, #1a3a6b 0%, #0d2142 100%);
+  color: #ffffff !important;
+  border: none;
 }
 
 /* =============================================
@@ -746,11 +878,7 @@ body.is-mobile .modal.calibre-browse-modal {
    ============================================= */
 
 .book-search-global-btn {
-  width: 100%;
-  margin-bottom: 8px;
-  font-size: 1.05em;
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
+  margin-bottom: 12px;
 }
 
 /* =============================================
@@ -841,7 +969,7 @@ body.is-mobile .modal.calibre-browse-modal {
 
 .book-search-input-modal input[type="text"],
 .book-search-global-modal input[type="text"] {
-  width: 320px;
+  width: 360px; /* Increased from 320px */
   max-width: 100%;
   box-sizing: border-box;
   text-align: center;
@@ -861,6 +989,28 @@ body.is-mobile .modal.calibre-browse-modal {
   font-size: 0.8em;
   color: var(--text-muted);
   min-height: 1.2em;
+}
+
+body.is-mobile .book-search-global-status {
+  margin-top: 4px;
+}
+
+body.is-mobile .book-search-input-modal button.mod-cta,
+body.is-mobile .book-search-global-modal button.mod-cta {
+  margin-top: 4px !important;
+  width: 100% !important;
+}
+
+body.is-mobile .modal.book-search-global-modal .modal-content {
+  width: 100% !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+body.is-mobile .modal.book-search-input-modal input[type="text"],
+body.is-mobile .modal.book-search-global-modal input[type="text"] {
+  width: 100% !important;
+  max-width: 380px !important; /* Wider but with a cap */
 }
 
 .book-source-badge--loc {

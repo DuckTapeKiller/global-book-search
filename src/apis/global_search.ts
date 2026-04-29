@@ -600,9 +600,7 @@ function mergeBooks(
     const secLabels = (secondary as BookWithSource)._sourceLabels || [];
     const secIds = (secondary as BookWithSource)._sourceIds || [];
     const secLabel =
-      secLabels[0] ||
-      GLOBAL_SEARCH_SOURCE_LABELS[secIds[0] || ""] ||
-      "Unknown";
+      secLabels[0] || GLOBAL_SEARCH_SOURCE_LABELS[secIds[0] || ""] || "Unknown";
 
     (Object.keys(secondary) as (keyof Book)[]).forEach((field) => {
       if (hardImmutable.includes(field)) return;

@@ -42,7 +42,9 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       // Primary attempt
       $(".book-pane").each((_, el) => {
         const pane = $(el);
-        const titleNode = pane.find(".book-title-author-and-series h3 a").first();
+        const titleNode = pane
+          .find(".book-title-author-and-series h3 a")
+          .first();
         const relativeLink = titleNode.attr("href");
 
         if (!relativeLink) return;
@@ -271,18 +273,25 @@ export class StoryGraphApi implements BaseBooksApiImpl {
 
     // ── Primary Author ──────────────────────────────────────────────────────
     const authors: string[] = [];
-    desktopLayout.find(".book-title-author-and-series p.font-body > a").each((_, el) => {
-      const a = $(el).text().trim();
-      if (a && !authors.includes(a)) authors.push(a);
-    });
+    desktopLayout
+      .find(".book-title-author-and-series p.font-body > a")
+      .each((_, el) => {
+        const a = $(el).text().trim();
+        if (a && !authors.includes(a)) authors.push(a);
+      });
 
     // ── Translator / Contributors ───────────────────────────────────────────
     let translator = "";
     // Check span.hidden.contributor-names (for search results)
-    const contributorSpan = desktopLayout.find("span.hidden.contributor-names").first();
+    const contributorSpan = desktopLayout
+      .find("span.hidden.contributor-names")
+      .first();
     if (contributorSpan.length > 0) {
       const rawContributor = contributorSpan.text().trim();
-      translator = rawContributor.replace(/^with\s+/i, "").replace(/\s*\(Translator\)\s*$/i, "").trim();
+      translator = rawContributor
+        .replace(/^with\s+/i, "")
+        .replace(/\s*\(Translator\)\s*$/i, "")
+        .trim();
     }
     // Check links directly (for /editions or details page)
     pane.find("span.hidden.contributor-names a").each((_, el) => {

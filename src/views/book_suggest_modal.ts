@@ -15,6 +15,13 @@ export class BookSuggestModal extends SuggestModal<Book> {
     this.showCoverImageInSearch = showCoverImageInSearch;
   }
 
+  onOpen() {
+    super.onOpen();
+    if (Platform.isMobile) {
+      this.inputEl.blur();
+    }
+  }
+
   // Returns all available suggestions.
   getSuggestions(query: string): Book[] {
     return this.suggestion.filter((book) => {

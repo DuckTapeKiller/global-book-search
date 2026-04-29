@@ -14,6 +14,13 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
     this.setPlaceholder("Filter results...");
   }
 
+  onOpen() {
+    super.onOpen();
+    if (Platform.isMobile) {
+      this.inputEl.blur();
+    }
+  }
+
   getSuggestions(query: string): BookWithSource[] {
     const lowerQuery = query.toLowerCase();
     return this.books.filter(
