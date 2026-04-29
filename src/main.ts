@@ -359,7 +359,8 @@ export default class BookSearchPlugin extends Plugin {
             }
           }
 
-          await this.noteCreator.create(book);
+          const targetFile = await this.noteCreator.create(book);
+          await this.openNewBookNote(targetFile);
           successCount++;
         } catch (err) {
           errors.push(
@@ -460,7 +461,8 @@ export default class BookSearchPlugin extends Plugin {
             }
           }
 
-          await this.noteCreator.create(book);
+          const targetFile = await this.noteCreator.create(book);
+          await this.openNewBookNote(targetFile);
           successCount++;
         } catch (err) {
           errors.push(

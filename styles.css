@@ -225,15 +225,15 @@ body.is-mobile .modal.book-search-service-selection-modal.is-closing {
 }
 
 /* Mobile Search Modal Positioning - Keyboard Clearance */
-body.is-mobile .modal.book-search-input-modal {
-  /* Move higher up to avoid keyboard hiding buttons */
-  position: absolute !important;
-  top: 15% !important;
+body.is-mobile .modal.book-search-input-modal,
+body.is-mobile .modal.book-search-global-modal {
+  /* Move slightly lower but keep high enough for keyboard */
+  position: fixed !important;
+  top: 70px !important;
   bottom: auto !important;
-  /* Maintain horizontal centering */
+
   left: 50% !important;
   transform: translateX(-50%) !important;
-  /* Reset margins */
   margin: 0 !important;
 }
 
@@ -740,9 +740,68 @@ body.is-mobile .modal.calibre-browse-modal {
   to { transform: rotate(360deg); }
 }
 
+
+/* Centered Search Modals (Desktop & General Layout) */
+.book-search-input-modal .modal-content,
+.book-search-global-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* Override Obsidian Setting defaults to be vertical/centered */
+.book-search-input-modal .setting-item,
+.book-search-global-modal .setting-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100%;
+}
+
+.book-search-input-modal .setting-item-info,
+.book-search-global-modal .setting-item-info {
+  margin: 0 0 4px 0 !important;
+  text-align: center !important;
+  width: 100% !important;
+}
+
+.book-search-input-modal .setting-item-control,
+.book-search-global-modal .setting-item-control {
+  display: flex;
+  justify-content: center !important;
+  width: 100% !important;
+}
+
+.book-search-global-subtitle {
+  text-align: center !important;
+  width: 100% !important;
+  display: block !important;
+}
+
+.book-search-input-modal input[type="text"],
+.book-search-global-modal input[type="text"] {
+  width: 320px;
+  max-width: 100%;
+  text-align: center;
+}
+
+/* Search button below input */
+.book-search-input-modal button.mod-cta,
+.book-search-global-modal button.mod-cta {
+  display: block;
+  margin: 4px auto 0 auto !important;
+  min-width: 120px;
+}
+
 .book-search-global-status {
+  text-align: center;
+  margin-top: 10px;
   font-size: 0.8em;
   color: var(--text-muted);
   min-height: 1.2em;
-  margin-top: 4px;
 }

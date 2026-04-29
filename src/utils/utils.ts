@@ -210,6 +210,9 @@ export function toStringFrontMatter(frontMatter: object): string {
       }
 
       if (/\r|\n/.test(stringValue)) {
+        if (stringValue.trim().startsWith("- ")) {
+          return `${key}:\n  ${stringValue.trim()}\n`;
+        }
         return "";
       }
 
@@ -283,20 +286,33 @@ function replacer(str: string, reg: RegExp, replaceValue) {
   });
 }
 
-export function createBookTags(book: Book): string[] {
+export function createBookTags(
+  book: Book,
+  authorPrefix?: string,
+  titlePrefix?: string,
+): string[] {
   const sanitize = (str: string) => {
     return str
       .toLowerCase()
+      .trim()
       .replace(/\s+/g, "_")
-      .replace(/[^\p{L}\p{N}_]/gu, ""); // Allow all unicode letters/numbers (accents supported)
+      .replace(/[^\p{L}\p{N}_]/gu, "");
   };
 
   const tags = [];
-  if (book.author) {
-    tags.push(sanitize(book.author));
+
+  // 1. Author tag (primary)
+  const authorName =
+    book.author ||
+    (book.authors && book.authors.length > 0 ? book.authors[0] : "");
+  if (authorName) {
+    tags.push((authorPrefix || "") + sanitize(authorName));
   }
+
+  // 2. Title tag
   if (book.title) {
-    tags.push(sanitize(book.title));
+    tags.push((titlePrefix || "") + sanitize(book.title));
   }
-  return tags;
+
+  return tags.filter((t) => t.length > 0);
 }

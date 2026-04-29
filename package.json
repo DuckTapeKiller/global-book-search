@@ -1,6 +1,6 @@
 {
   "name": "obsidian-book-search-plus",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Search for books in Google Books, Goodreads, and local Calibre libraries to create notes.",
   "homepage": "https://github.com/DuckTapeKiller/obsidian-book-search-plus",
   "main": "main.js",

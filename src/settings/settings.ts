@@ -43,6 +43,8 @@ export interface BookSearchPluginSettings {
   enableSeriesLinking: boolean; // Add series links automatically
   showTemplatePreview: boolean; // Preview note before creation
   showIndividualServiceButtons: boolean; // Show all providers in selection modal
+  authorTagPrefix: string;
+  titleTagPrefix: string;
 }
 
 export const FRONTMATTER_TEMPLATES = {
@@ -295,6 +297,8 @@ export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
   enableSeriesLinking: true,
   showTemplatePreview: false,
   showIndividualServiceButtons: false,
+  authorTagPrefix: "",
+  titleTagPrefix: "",
 };
 
 export class BookSearchSettingTab extends PluginSettingTab {
@@ -438,6 +442,34 @@ export class BookSearchSettingTab extends PluginSettingTab {
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           });
       });
+  }
+
+  private createTagSettings(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Author tag prefix")
+      .setDesc("Add a prefix to the author tag (e.g., 'escritores/').")
+      .addText((text) =>
+        text
+          .setPlaceholder("Example: escritores/")
+          .setValue(this.plugin.settings.authorTagPrefix)
+          .onChange((value) => {
+            this.plugin.settings.authorTagPrefix = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Title tag prefix")
+      .setDesc("Add a prefix to the book title tag (e.g., 'libros/').")
+      .addText((text) =>
+        text
+          .setPlaceholder("Example: libros/")
+          .setValue(this.plugin.settings.titleTagPrefix)
+          .onChange((value) => {
+            this.plugin.settings.titleTagPrefix = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
   }
 
   private createCoverImageSaveSetting(containerEl: HTMLElement) {
@@ -918,6 +950,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
     this.createFrontmatterSetting(containerEl);
     this.createTemplateFileSetting(containerEl);
     this.createContentSetting(containerEl);
+    this.createTagSettings(containerEl);
     this.createCoverImageSaveSetting(containerEl);
     this.createCoverImagePathSetting(containerEl);
     this.createShowTemplatePreviewSetting(containerEl);

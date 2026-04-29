@@ -43,7 +43,11 @@ export class BookNoteCreator {
     let { frontmatter, content } = this.settings;
 
     // Generate tags automatically
-    book.tags = createBookTags(book);
+    book.tags = createBookTags(
+      book,
+      this.settings.authorTagPrefix,
+      this.settings.titleTagPrefix,
+    );
 
     // Handle cover image
     const coverImageUrl = book.coverSmallUrl || book.coverUrl;

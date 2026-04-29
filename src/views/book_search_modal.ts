@@ -95,13 +95,6 @@ export class BookSearchModal extends Modal {
     )
       this.renderSelectLocale();
 
-    // Search input with history dropdown
-    const searchHistory = this.plugin.getSearchHistory();
-
-    if (searchHistory.length > 0) {
-      this.renderSearchHistory(searchHistory);
-    }
-
     contentEl.createDiv(
       { cls: "book-search-plugin__search-modal--input" },
       (el) => {
@@ -127,25 +120,6 @@ export class BookSearchModal extends Modal {
         .setCta()
         .onClick(() => void this.searchBook());
     });
-  }
-
-  renderSearchHistory(history: string[]): void {
-    new Setting(this.contentEl)
-      .setName("Recent searches")
-      .addDropdown((dropdown) => {
-        dropdown.addOption("", "-- Select --");
-        history.forEach((search) => {
-          dropdown.addOption(search, search);
-        });
-        dropdown.onChange((value) => {
-          if (value) {
-            this.query = value;
-            if (this.searchInput) {
-              this.searchInput.setValue(value);
-            }
-          }
-        });
-      });
   }
 
   renderSelectLocale() {

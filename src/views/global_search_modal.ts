@@ -27,8 +27,6 @@ export class GlobalSearchModal extends Modal {
       cls: "book-search-global-subtitle",
     });
 
-    this.renderSearchHistory();
-
     const searchSetting = new Setting(contentEl)
       .setName("Search")
       .setDesc("Search by title, author, or ISBN")
@@ -58,30 +56,6 @@ export class GlobalSearchModal extends Modal {
     });
 
     searchButton.addEventListener("click", () => void this.doSearch());
-  }
-
-  private renderSearchHistory() {
-    const history = this.plugin.getSearchHistory();
-    if (history.length === 0) return;
-
-    const historyContainer = this.contentEl.createDiv({
-      cls: "book-search-history-container",
-    });
-    historyContainer.createEl("span", {
-      text: "Recent: ",
-      cls: "book-search-history-label",
-    });
-
-    history.forEach((query) => {
-      const tag = historyContainer.createEl("span", {
-        text: query,
-        cls: "book-search-history-tag",
-      });
-      tag.addEventListener("click", () => {
-        this.query = query;
-        void this.doSearch();
-      });
-    });
   }
 
   async doSearch() {
