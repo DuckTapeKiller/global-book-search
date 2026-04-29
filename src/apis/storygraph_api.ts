@@ -9,8 +9,8 @@ export class StoryGraphApi implements BaseBooksApiImpl {
   constructor() {}
 
   async getByQuery(query: string): Promise<Book[]> {
+    const searchUrl = `${this.baseUrl}/browse?search_term=${encodeURIComponent(query)}`;
     try {
-      const searchUrl = `${this.baseUrl}/browse?search_term=${encodeURIComponent(query)}`;
       const searchRes = await requestUrl({
         url: searchUrl,
         method: "GET",
@@ -23,49 +23,68 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       const $ = cheerio.load(searchRes.text);
       const books: Book[] = [];
 
+      // Detect if we got a login redirect instead of search results
+      // Only treat as login if no book panes are found AND we see the explicit redirect message
+      if (
+        $(".book-pane").length === 0 &&
+        $("[data-book-id]").length === 0 &&
+        (searchRes.text.includes("You need to sign in") ||
+          searchRes.text.includes("You are being redirected") ||
+          searchRes.text.includes("<title>Sign In"))
+      ) {
+        console.warn(
+          "StoryGraph: search requires authentication. " +
+            "Please ensure you are logged in or try a different service.",
+        );
+        return [];
+      }
+
+      // Primary attempt
       $(".book-pane").each((_, el) => {
         const pane = $(el);
-        // Scope to desktop layout to avoid duplicates if present
-        const desktopLayout =
-          pane.find(".hidden.md\\:block").length > 0
-            ? pane.find(".hidden.md\\:block")
-            : pane;
-
-        const titleNode = desktopLayout
-          .find(".book-title-author-and-series h3 a")
-          .first();
-        const title = titleNode.text().trim();
+        const titleNode = pane.find(".book-title-author-and-series h3 a").first();
         const relativeLink = titleNode.attr("href");
 
-        if (!title || !relativeLink) return;
-
-        const author = desktopLayout
-          .find(".book-title-author-and-series p.font-body > a")
-          .first()
-          .text()
-          .trim();
-        const coverUrl = desktopLayout.find(".book-cover img").attr("src");
-        const id = pane.attr("data-book-id");
+        if (!relativeLink) return;
 
         const fullLink = relativeLink.startsWith("http")
           ? relativeLink
           : `${this.baseUrl}${relativeLink}`;
 
-        books.push({
-          title,
-          author,
-          authors: [author],
-          link: fullLink,
-          previewLink: fullLink,
-          coverUrl: coverUrl || "",
-          coverSmallUrl: coverUrl || "",
-          sourceId: id,
-        } as Book);
+        const bookData = this.extractBookData($, pane, fullLink);
+        if (bookData.title && bookData.title !== "Unknown Title") {
+          bookData.sourceId = pane.attr("data-book-id");
+          books.push(bookData);
+        }
       });
+
+      // If primary found nothing, try alternative selector
+      if (books.length === 0) {
+        $("[data-book-id]").each((_, el) => {
+          const pane = $(el);
+          const titleNode = pane.find("h3 a").first();
+          const relativeLink = titleNode.attr("href");
+
+          if (!relativeLink || !relativeLink.includes("/books/")) return;
+
+          const fullLink = relativeLink.startsWith("http")
+            ? relativeLink
+            : `${this.baseUrl}${relativeLink}`;
+
+          const bookData = this.extractBookData($, pane, fullLink);
+          if (bookData.title && bookData.title !== "Unknown Title") {
+            bookData.sourceId = pane.attr("data-book-id");
+            books.push(bookData);
+          }
+        });
+      }
 
       return books;
     } catch (error) {
-      console.warn("StoryGraph search error", error);
+      console.warn("StoryGraph getByQuery failed:", {
+        url: searchUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   }
@@ -91,17 +110,34 @@ export class StoryGraphApi implements BaseBooksApiImpl {
 
       let bestBook = book;
       let maxScore = -1;
+      let exactMatchFound = false;
 
       allEditions.each((_, el) => {
         const pane = $(el);
+        const id = pane.attr("data-book-id");
         const currentEdition = this.extractBookData($, pane, book.link);
-        const score = this.calculateEditionScore(currentEdition);
+        currentEdition.sourceId = id;
 
+        // CRITICAL: If this is the EXACT edition ID the user selected, use it!
+        if (id && book.sourceId && id === book.sourceId) {
+          bestBook = currentEdition;
+          exactMatchFound = true;
+          return false; // Break loop
+        }
+
+        const score = this.calculateEditionScore(currentEdition);
         if (score > maxScore) {
           maxScore = score;
           bestBook = currentEdition;
         }
       });
+
+      // If we didn't find an exact match or the best one has no ISBN, try fallback
+      if (!exactMatchFound && !bestBook.isbn13 && !bestBook.isbn10) {
+        const { isbn10, isbn13 } = await this.fetchIsbnFromBookPage(book.link);
+        if (isbn13) bestBook = { ...bestBook, isbn13 };
+        if (isbn10) bestBook = { ...bestBook, isbn10 };
+      }
 
       return bestBook;
     } catch (error) {
@@ -144,12 +180,85 @@ export class StoryGraphApi implements BaseBooksApiImpl {
     return score;
   }
 
+  private async fetchIsbnFromBookPage(
+    bookLink: string,
+  ): Promise<{ isbn10: string; isbn13: string }> {
+    let isbn10 = "";
+    let isbn13 = "";
+
+    try {
+      const res = await requestUrl({
+        url: bookLink,
+        method: "GET",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        },
+      });
+
+      const html: string = res.text;
+      if (!html) return { isbn10, isbn13 };
+
+      // Try JSON-LD structured data
+      const jsonLdMatches = html.matchAll(
+        /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+      );
+      for (const match of jsonLdMatches) {
+        try {
+          const data = JSON.parse(match[1]);
+          const entries = Array.isArray(data) ? data : [data];
+          for (const entry of entries) {
+            const rawIsbn =
+              entry?.isbn ||
+              entry?.isbn13 ||
+              entry?.isbn10 ||
+              entry?.["@graph"]?.[0]?.isbn;
+            if (rawIsbn) {
+              const digits = String(rawIsbn).replace(/[^0-9X]/gi, "");
+              if (digits.length === 13) isbn13 = digits;
+              else if (digits.length === 10) isbn10 = digits;
+            }
+          }
+          if (isbn13 || isbn10) break;
+        } catch {
+          // malformed JSON-LD — continue
+        }
+      }
+
+      // Fallback: try meta tags
+      if (!isbn13 && !isbn10) {
+        const metaMatch = html.match(
+          /<meta[^>]+(?:name|property)=["'](?:isbn|og:isbn|book:isbn)["'][^>]+content=["']([0-9X]+)["']/i,
+        );
+        if (metaMatch) {
+          const digits = metaMatch[1].replace(/[^0-9X]/gi, "");
+          if (digits.length === 13) isbn13 = digits;
+          else if (digits.length === 10) isbn10 = digits;
+        }
+      }
+
+      // Fallback: scan entire HTML for 13-digit ISBN-like sequences near "isbn"
+      if (!isbn13 && !isbn10) {
+        const isbnPattern = /isbn[^0-9]{0,10}(97[89][0-9]{10})/gi;
+        const isbnMatch = html.match(isbnPattern);
+        if (isbnMatch) {
+          const digits = isbnMatch[0].replace(/[^0-9]/g, "");
+          if (digits.length === 13) isbn13 = digits;
+        }
+      }
+    } catch (err) {
+      console.warn("StoryGraph fetchIsbnFromBookPage failed:", err);
+    }
+
+    return { isbn10, isbn13 };
+  }
+
   private extractBookData(
     $: cheerio.Root,
     pane: cheerio.Cheerio,
     link: string,
   ): Book {
-    // Scope to desktop layout as requested
+    // Title, author, cover, summary come from desktopLayout
     const desktopLayout =
       pane.find(".hidden.md\\:block").length > 0
         ? pane.find(".hidden.md\\:block")
@@ -160,112 +269,139 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       .first();
     const title = titleNode.text().trim() || "Unknown Title";
 
-    const primaryAuthor = desktopLayout
-      .find(".book-title-author-and-series p.font-body > a")
-      .first()
-      .text()
-      .trim();
+    // ── Primary Author ──────────────────────────────────────────────────────
+    const authors: string[] = [];
+    desktopLayout.find(".book-title-author-and-series p.font-body > a").each((_, el) => {
+      const a = $(el).text().trim();
+      if (a && !authors.includes(a)) authors.push(a);
+    });
 
-    // Contributors / Translators
-    const contributorNames = desktopLayout
-      .find("span.contributor-names")
-      .text()
-      .trim();
+    // ── Translator / Contributors ───────────────────────────────────────────
     let translator = "";
-    if (contributorNames) {
-      // Logic to strip "with" and potentially separate names
-      translator = contributorNames.replace(/^with\s+/i, "").trim();
+    // Check span.hidden.contributor-names (for search results)
+    const contributorSpan = desktopLayout.find("span.hidden.contributor-names").first();
+    if (contributorSpan.length > 0) {
+      const rawContributor = contributorSpan.text().trim();
+      translator = rawContributor.replace(/^with\s+/i, "").replace(/\s*\(Translator\)\s*$/i, "").trim();
     }
-
-    // Genres / Tags (Issue 1 fix)
-    const genres: string[] = [];
-    desktopLayout
-      .find(".book-pane-tag-section span.inline-block")
-      .each((_, el) => {
-        const tag = $(el).text().trim();
-        if (tag) genres.push(tag);
-      });
-    const categories = genres.join(", ");
-
-    // Summary Line (Pages, Format, Year)
-    const summaryText = desktopLayout
-      .find("p.text-xs.font-light")
-      .text()
-      .trim();
-    let totalPage = "";
-    let publishDate = "";
-
-    if (summaryText) {
-      const parts = summaryText.split("•").map((p) => p.trim());
-      parts.forEach((part) => {
-        const pageMatch = part.match(/(\d+)\s*pages/i);
-        if (pageMatch) {
-          totalPage = pageMatch[1];
-        } else if (/^\d{4}$/.test(part)) {
-          publishDate = part;
-        }
-      });
-    }
-
-    // Detailed Edition Metadata
-    let isbn10 = "";
-    let isbn13 = "";
-    let publisher = "";
-    let language = "";
-
-    desktopLayout.find(".edition-info p").each((_, el) => {
-      const text = $(el).text();
-      const splitIndex = text.indexOf(":");
-      if (splitIndex !== -1) {
-        const key = text.substring(0, splitIndex).trim().toLowerCase();
-        const value = text.substring(splitIndex + 1).trim();
-
-        if (value !== "None" && value !== "Not specified") {
-          if (key.includes("isbn")) {
-            if (value.length === 10) isbn10 = value;
-            else if (value.length === 13) isbn13 = value;
-            // else: discard malformed identifiers
-          } else if (key.includes("publisher")) {
-            publisher = value;
-          } else if (key.includes("language")) {
-            language = value;
-          } else if (key.includes("original pub year") && !publishDate) {
-            publishDate = value;
-          }
-        }
+    // Check links directly (for /editions or details page)
+    pane.find("span.hidden.contributor-names a").each((_, el) => {
+      const name = $(el).text().trim();
+      if (name && !authors.includes(name)) {
+        translator = name;
       }
     });
 
-    // Cover extraction
+    // ── Edition metadata ────────────────────────────────────────────────────
+    let isbn10 = "";
+    let isbn13 = "";
+    let publisher = "";
+    let publishDate = "";
+    let totalPage = "";
+
+    // Parse labels like "ISBN/UID", "Publisher", "Edition Pub Date"
+    pane.find(".edition-info p").each((_, p) => {
+      const text = $(p).text().trim();
+      if (!text.includes(":")) return;
+
+      const parts = text.split(":");
+      const key = parts[0].toLowerCase().trim();
+      const value = parts.slice(1).join(":").trim();
+
+      if (key.includes("isbn")) {
+        const digits = value.replace(/[^0-9X]/gi, "");
+        if (digits.length === 13) isbn13 = digits;
+        else if (digits.length === 10) isbn10 = digits;
+      } else if (key.includes("publisher")) {
+        publisher = value;
+      } else if (
+        key.includes("edition pub date") ||
+        key.includes("edition published") ||
+        key.includes("pub date")
+      ) {
+        publishDate = value;
+      }
+    });
+
+    // ── Aggressive Fallbacks ───────────────────────────────────────────────
+
+    // ISBN from entire pane text
+    if (!isbn13 && !isbn10) {
+      const paneText = pane.text();
+      const isbnMatches = paneText.match(/\b(?:97[89])?\d{9}[\dX]\b/g);
+      if (isbnMatches) {
+        for (const m of isbnMatches) {
+          const digits = m.replace(/[^0-9X]/gi, "");
+          if (digits.length === 13) {
+            isbn13 = digits;
+            break;
+          } else if (digits.length === 10 && !isbn10) {
+            isbn10 = digits;
+          }
+        }
+      }
+    }
+
+    // Pages from summary line (e.g. "498 pages • hardcover • 2015")
+    if (!totalPage) {
+      const summaryText = pane.find("p.text-xs.font-light").first().text();
+      const pageMatch = summaryText.match(/(\d+)\s*pages/i);
+      if (pageMatch) totalPage = pageMatch[1];
+    }
+
+    // Genre/Categories from tags
+    const genreSet = new Set<string>();
+    const genreSelectors = [
+      ".book-pane-tag-section span.inline-block",
+      ".book-pane-tag-section a",
+      "span.inline-block.book-pane-tag",
+    ];
+    genreSelectors.forEach((sel) => {
+      pane.find(sel).each((_, el) => {
+        const cat = $(el).text().trim();
+        if (cat && cat.length < 30) genreSet.add(cat);
+      });
+    });
+    const categories = Array.from(genreSet).join(", ");
+
+    // ── Cover ───────────────────────────────────────────────────────────────
     const coverWrapper = desktopLayout.find(".book-cover");
     const imgNode = coverWrapper.find("img");
     let coverUrl = imgNode.attr("src") || "";
-
-    // Placeholder check
     if (
       coverWrapper.hasClass("placeholder-cover") ||
       coverUrl.includes("placeholder-cover")
     ) {
-      coverUrl = ""; // Don't save placeholders
+      coverUrl = "";
+    }
+
+    // Cover ISBN fallback
+    if (!isbn13 && !isbn10 && coverUrl) {
+      const olMatch = coverUrl.match(/\/isbn\/([0-9X]+)/i);
+      if (olMatch) {
+        const digits = olMatch[1].replace(/[^0-9X]/gi, "");
+        if (digits.length === 13) isbn13 = digits;
+        else if (digits.length === 10) isbn10 = digits;
+      }
     }
 
     return {
       title,
-      author: primaryAuthor,
-      authors: [primaryAuthor],
-      translator,
-      totalPage,
-      publishDate,
-      publisher,
+      author: authors[0] || "Unknown Author",
+      authors: authors.length > 0 ? authors : ["Unknown Author"],
       category: categories,
-      categories: categories,
-      isbn10,
-      isbn13,
+      categories,
+      publisher,
+      publishDate,
+      totalPage,
       coverUrl,
       coverSmallUrl: coverUrl,
+      description: "",
       link,
       previewLink: link,
-      description: "", // StoryGraph doesn't seem to have description on editions page
+      isbn10,
+      isbn13,
+      translator,
     } as Book;
   }
 }

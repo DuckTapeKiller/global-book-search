@@ -168,7 +168,8 @@ export class BookNoteCreator {
   private sanitizeImageName(book: Book): string {
     const raw = `${book.title} — ${book.author}`;
     const sanitized = raw
-      .replace(/[:/\\?%*|"<>#[]()]/g, "") // Thoroughly sanitize for Obsidian and OS
+      // Thoroughly sanitize for Obsidian + common OS filename restrictions.
+      .replace(/[\\/:?%*|"<>#[\]()]/g, "")
       .replace(/\s+/g, " ")
       .trim();
     // Truncate to 200 chars to leave room for extension and path

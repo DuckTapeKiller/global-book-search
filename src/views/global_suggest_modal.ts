@@ -49,9 +49,13 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
       cls: "book-meta-info",
     });
 
-    textInfo.createEl("span", {
-      text: book._sourceLabel,
-      cls: `book-source-badge book-source-badge--${book._sourceId}`,
+    const sourceContainer = textInfo.createDiv({ cls: "book-source-badges" });
+    book._sourceIds.forEach((id, index) => {
+      const label = book._sourceLabels[index] || id;
+      sourceContainer.createEl("span", {
+        text: label,
+        cls: `book-source-badge book-source-badge--${id}`,
+      });
     });
   }
 

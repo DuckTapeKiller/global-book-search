@@ -12,4 +12,6 @@ export const GLOBAL_SEARCH_SOURCE_LABELS: Record<string, string> = {
   openlibrary: "OpenLibrary",
   storygraph: "StoryGraph",
   calibre: "Calibre",
+  fable: "Fable",
+  loc: "Library of Congress",
 };

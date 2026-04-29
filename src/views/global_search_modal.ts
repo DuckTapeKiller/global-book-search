@@ -37,7 +37,7 @@ export class GlobalSearchModal extends Modal {
           .onChange((value) => (this.query = value));
 
         text.inputEl.addEventListener("keydown", (event: KeyboardEvent) => {
-          if (event.key === "Enter") {
+          if (event.key === "Enter" && !event.isComposing) {
             void this.doSearch();
           }
         });

@@ -298,87 +298,110 @@ export default class BookSearchPlugin extends Plugin {
 
   async createMultipleCalibreNotes(): Promise<void> {
     try {
-      // Search for books
+      // 1. Search for books via Calibre
       const searchedBooks = await this.openBookSearchModal(
         undefined,
         "calibre",
       );
 
-      // Open multi-select modal
+      // 2. Open multi-select modal to let user pick which ones to import
       const selectedBooks =
         await this.openCalibreMultiSelectModal(searchedBooks);
 
-      if (selectedBooks.length === 0) {
+      if (selectedBooks.length === 0) return;
+
+      const ENRICH_LIMIT = 5;
+
+      // ── PATH A: More than 5 books (No online enrichment) ──────────────────
+      if (selectedBooks.length > ENRICH_LIMIT) {
+        new Notice(
+          `${selectedBooks.length} books selected — notes will be created without online enrichment.`,
+        );
+
+        for (const book of selectedBooks) {
+          try {
+            // Check for duplicate
+            const { action, file: existingFile } =
+              await this.checkForDuplicate(book);
+            if (action === DuplicateAction.CANCEL) continue;
+            if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
+              await this.openNewBookNote(existingFile);
+              continue;
+            }
+
+            // Create note with original Calibre data
+            const targetFile = await this.noteCreator.create(book);
+            await this.openNewBookNote(targetFile);
+          } catch (err) {
+            console.warn(`Failed to create note for "${book.title}":`, err);
+          }
+        }
         return;
       }
 
-      // Enrich selected books with full details (with concurrency limit)
-      const api = factoryServiceProvider(this.settings, "calibre");
-      const enrichedBooks: Book[] = [];
-      const CONCURRENCY_LIMIT = 5;
+      // ── PATH B: 1-5 books (Enrich each one before creation) ───────────────
+      for (const book of selectedBooks) {
+        const progressModal = new EnrichmentProgressModal(this.app);
+        progressModal.open();
 
-      for (let i = 0; i < selectedBooks.length; i += CONCURRENCY_LIMIT) {
-        const batch = selectedBooks.slice(i, i + CONCURRENCY_LIMIT);
-        const batchResults = await Promise.all(
-          batch.map(async (book) => {
-            if (api.getBook) {
-              return await api.getBook(book);
-            }
-            return book;
-          }),
-        );
-        enrichedBooks.push(...batchResults);
-      }
-
-      // Create notes for all selected books (with duplicate check)
-      let successCount = 0;
-      let skippedCount = 0;
-      const errors: string[] = [];
-      const totalCount = enrichedBooks.length;
-      const progressNotice = new Notice(
-        `Importing 0 / ${totalCount} books...`,
-        0,
-      );
-
-      for (const [index, book] of enrichedBooks.entries()) {
         try {
-          progressNotice.setMessage(
-            `Importing ${index + 1} / ${totalCount}: ${book.title}`,
+          progressModal.setStatus(`Enriching "${book.title}"...`);
+
+          const bookWithSource = {
+            ...book,
+            _sourceId: "calibre",
+            _sourceLabel: "Calibre",
+          } as BookWithSource;
+
+          const { book: enrichedBook, sources } = await enrichBookByISBN(
+            bookWithSource,
+            this.settings,
+            (msg) => progressModal.setStatus(msg),
           );
-          // Check for duplicate (skip modal for batch, just skip duplicates)
-          if (this.settings.warnOnDuplicate) {
-            const existingFile = findExistingBookNote(
-              this.app,
-              this.settings.folder,
-              book.title,
-              book.isbn13 || book.isbn10 || book.ids,
-            );
-            if (existingFile) {
-              skippedCount++;
-              continue;
-            }
+
+          const { action, file: existingFile } =
+            await this.checkForDuplicate(enrichedBook);
+
+          if (action === DuplicateAction.CANCEL) {
+            progressModal.close();
+            continue;
           }
 
-          const targetFile = await this.noteCreator.create(book);
-          await this.openNewBookNote(targetFile);
-          successCount++;
-        } catch (err) {
-          errors.push(
-            `${book.title}: ${err instanceof Error ? err.message : String(err)}`,
+          if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
+            progressModal.markDone("Opening existing note...");
+            await this.openNewBookNote(existingFile);
+            continue;
+          }
+
+          const targetFile = await this.noteCreator.create(enrichedBook);
+
+          const sourcesSummary =
+            sources.length > 1 ? `Data from: ${sources.join(", ")}` : "";
+          progressModal.markDone(
+            sourcesSummary
+              ? `Note created. ${sourcesSummary}`
+              : "Note created.",
           );
+
+          await this.openNewBookNote(targetFile);
+        } catch (err) {
+          progressModal.markError(
+            err instanceof Error ? err.message : "An error occurred.",
+          );
+          console.warn(`Enrichment failed for "${book.title}":`, err);
+
+          // Fallback: Attempt to create the note with original data anyway
+          try {
+            const targetFile = await this.noteCreator.create(book);
+            await this.openNewBookNote(targetFile);
+          } catch (createErr) {
+            console.warn(
+              `Also failed to create note for "${book.title}":`,
+              createErr,
+            );
+          }
         }
       }
-      progressNotice.hide();
-
-      // Show summary
-      let message = `Created ${successCount} book note${successCount !== 1 ? "s" : ""}`;
-      if (skippedCount > 0) {
-        message += `, skipped ${skippedCount} duplicate${skippedCount !== 1 ? "s" : ""}`;
-      }
-      if (errors.length > 0) {
-        message += `. Failed: ${errors.join(", ")}`;
-      }
-      new Notice(message);
     } catch (err) {
       if (err instanceof Error && err.message !== "Cancelled request") {
         console.warn(err);
