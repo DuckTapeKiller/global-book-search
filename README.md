@@ -15,7 +15,7 @@
 - [Template System and Variables](#template-system-and-variables)
 - [Calibre Integration](#calibre-integration)
 - [Mobile Optimization](#mobile-optimization)
-- [Development and Credits](#development-and-credits)
+- [Installation and Credits](#installation-and-credits)
 
 ---
 
@@ -162,7 +162,7 @@ The interface has been specifically hardened for the Obsidian Mobile application
 
 ---
 
-## Development and Credits
+## Installation and Credits
 
 ### [i] Installation
 1. Navigate to your Obsidian vault's hidden configuration folder: `<vault>/.obsidian/plugins/`.
