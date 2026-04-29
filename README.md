@@ -164,11 +164,15 @@ The interface has been specifically hardened for the Obsidian Mobile application
 
 ## Development and Credits
 
-### [i] Build Instructions
-```bash
-npm install
-npm run build
-```
+### [i] Installation
+1. Navigate to your Obsidian vault's hidden configuration folder: `<vault>/.obsidian/plugins/`.
+2. Create a new directory named `book-search-plus`.
+3. Download the latest release files from the GitHub repository.
+4. Place the following three files into the `book-search-plus` folder:
+   - `main.js`
+   - `manifest.json`
+   - `styles.css`
+5. Open Obsidian and enable **Book Search Plus** in the Community Plugins settings.
 
 ### [i] Acknowledgments
 - Based on the original [obsidian-book-search-plugin](https://github.com/anpigon/obsidian-book-search-plugin) by anpigon.
