@@ -1,3 +1,10 @@
+[![GitHub Repo stars](https://img.shields.io/github/stars/DuckTapeKiller/obsidian-book-search-plus?style=flat&logo=obsidian&color=%23483699)](https://github.com/DuckTapeKiller/obsidian-book-search-plus/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/DuckTapeKiller/obsidian-book-search-plus?logo=obsidian&color=%23483699)](https://github.com/DuckTapeKiller/obsidian-book-search-plus/issues)
+[![GitHub closed issues](https://img.shields.io/github/issues-closed/DuckTapeKiller/obsidian-book-search-plus?logo=obsidian&color=%23483699)](https://github.com/DuckTapeKiller/obsidian-book-search-plus/issues?q=is%3Aissue+is%3Aclosed)
+[![GitHub manifest version](https://img.shields.io/github/manifest-json/v/DuckTapeKiller/obsidian-book-search-plus?logo=obsidian&color=%23483699)](https://github.com/DuckTapeKiller/obsidian-book-search-plus/blob/main/manifest.json)
+[![Downloads](https://img.shields.io/github/downloads/DuckTapeKiller/obsidian-book-search-plus/total?logo=obsidian&color=%23483699)](https://github.com/DuckTapeKiller/obsidian-book-search-plus/releases)
+
+
 ![Book Search Plus Art](https://github.com/user-attachments/assets/8a191a9a-bb79-4348-ae78-a4a21dd560c2)
 
 # Book Search Plus
