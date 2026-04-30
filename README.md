@@ -43,6 +43,7 @@ Consolidates results from all configured services into a single unified view.
 - Automatically deduplicates results by normalizing titles and authors.
 - Displays source badges for each result to indicate data availability.
 - Triggers the full enrichment pipeline upon selection.
+- QR/Barcode Scanner: You can now point your camera at a physical book’s barcode to instantly trigger the extraction pipeline.
 
 ### [i] Individual Service Search
 Allows for targeted searching within a specific provider (e.g., searching only your local Calibre library or only StoryGraph).
