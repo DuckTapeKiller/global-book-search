@@ -17,9 +17,6 @@ export class BookSuggestModal extends SuggestModal<Book> {
 
   onOpen() {
     super.onOpen();
-    if (Platform.isMobile) {
-      this.inputEl.blur();
-    }
   }
 
   // Returns all available suggestions.

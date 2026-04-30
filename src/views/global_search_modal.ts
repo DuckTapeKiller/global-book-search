@@ -1,6 +1,7 @@
 import { Modal, Notice, Setting, setIcon, Platform } from "obsidian";
 import BookSearchPlugin from "@src/main";
 import { globalSearch, BookWithSource } from "@apis/global_search";
+import { BarcodeScannerModal } from "./barcode_scanner_modal";
 
 export class GlobalSearchModal extends Modal {
   private query: string;
@@ -50,6 +51,23 @@ export class GlobalSearchModal extends Modal {
     }
 
     searchSetting.addText((text) => {
+      const parentEl = text.inputEl.parentElement;
+      if (parentEl) {
+        parentEl.addClass("book-search-input-container");
+        const scanButton = parentEl.createEl("button", {
+          cls: "book-search-scan-button",
+          attr: { title: "Scan barcode" },
+        });
+        setIcon(scanButton, "scan");
+        scanButton.addEventListener("click", () => {
+          new BarcodeScannerModal(this.app, (isbn) => {
+            this.query = isbn;
+            text.setValue(isbn);
+            void this.doSearch();
+          }).open();
+        });
+      }
+
       text
         .setPlaceholder("Search by title, author, or ISBN")
         .setValue(this.query)

@@ -1,7 +1,7 @@
 /* Design System & Animations */
 :root {
   --bsp-gradient: linear-gradient(135deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
-  --bsp-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  --bsp-shadow: none;
 }
 
 @keyframes bsp-shimmer {
@@ -15,7 +15,7 @@
 }
 
 .book-search-plugin__header {
-  border-bottom: 2px solid var(--interactive-accent);
+  border-bottom: var(--border-width) solid var(--interactive-accent);
   padding-bottom: 12px;
   margin-top: 32px !important;
   margin-bottom: 20px !important;
@@ -80,11 +80,6 @@
   align-items: center;
   padding: 12px;
   cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.book-suggestion-item:hover {
-  background-color: var(--background-modifier-hover);
 }
 
 .book-cover-image {
@@ -93,7 +88,6 @@
   margin-right: 16px;
   object-fit: cover;
   border-radius: var(--radius-s);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   background-color: var(--background-secondary-alt);
   flex-shrink: 0;
 }
@@ -146,7 +140,7 @@
 }
 
 .modal.book-search-global-modal.is-searching {
-  border-top: 2px solid var(--interactive-accent);
+  border-top: var(--border-width) solid var(--interactive-accent);
 }
 
 .modal.book-search-global-modal .modal-close-button {
@@ -224,7 +218,6 @@ body.is-mobile .modal.book-search-service-selection-modal {
   border-bottom-right-radius: 0 !important;
 
   border-bottom: none !important;
-  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25);
   background-color: var(--modal-background);
   padding: 24px !important;
 
@@ -343,8 +336,9 @@ body.is-mobile .modal.book-search-global-modal {
   width: 90% !important;
   transform: none !important;
   margin: 0 !important;
-  padding: 20px !important; /* Reduced from 32px */
+  padding: 20px 24px !important; /* Reduced from 32px */
   animation: none !important; /* Rule out animation glitches */
+  overflow: hidden !important;
 }
 
 body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-header {
@@ -428,16 +422,6 @@ body.is-mobile .modal.book-search-global-modal .setting-item-control {
   gap: 12px;
   padding: 10px 12px;
   cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.calibre-multi-select-item:hover {
-  background-color: var(--background-modifier-hover);
-}
-
-.calibre-multi-select-item.is-selected {
-  background-color: var(--background-modifier-active-hover);
-  border-color: var(--interactive-accent);
 }
 
 .calibre-multi-select-item input[type="checkbox"] {
@@ -681,16 +665,6 @@ body.is-mobile .calibre-multi-select-list {
   gap: 12px;
   padding: 10px 12px;
   cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.calibre-browse-book-item:hover {
-  background-color: var(--background-modifier-hover);
-}
-
-.calibre-browse-book-item.is-selected {
-  background-color: var(--background-modifier-active-hover);
-  border-color: var(--interactive-accent);
 }
 
 .calibre-browse-book-item input[type="checkbox"] {
@@ -810,7 +784,6 @@ body.is-mobile .modal.calibre-browse-modal {
   margin-right: 6px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   transition: transform 0.2s ease;
 }
 
@@ -951,10 +924,17 @@ body.is-mobile .modal.calibre-browse-modal {
 
 .book-search-input-modal input[type="text"],
 .book-search-global-modal input[type="text"] {
-  width: 360px; /* Increased from 320px */
+  width: 355px;
   max-width: 100%;
   box-sizing: border-box;
   text-align: center;
+}
+
+body.is-mobile .book-search-input-modal input[type="text"],
+body.is-mobile .book-search-global-modal input[type="text"] {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* Search button below input */
@@ -983,16 +963,25 @@ body.is-mobile .book-search-global-modal button.mod-cta {
   width: 100% !important;
 }
 
+body.is-mobile .modal.book-search-input-modal .modal-content,
 body.is-mobile .modal.book-search-global-modal .modal-content {
   width: 100% !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
 }
 
-body.is-mobile .modal.book-search-input-modal input[type="text"],
-body.is-mobile .modal.book-search-global-modal input[type="text"] {
-  width: 100% !important;
-  max-width: 380px !important; /* Wider but with a cap */
+body.is-mobile .modal.book-search-input-modal .book-search-input-container input[type="text"],
+body.is-mobile .modal.book-search-global-modal .book-search-input-container input[type="text"] {
+  width: 0 !important; /* Let flex-grow handle it */
+  flex: 1 !important;
+  max-width: 320px !important; /* Reduced width as requested */
+}
+
+body.is-mobile .book-search-input-container {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .book-source-badge--loc {
@@ -1028,11 +1017,6 @@ body.is-mobile .modal.book-search-global-modal input[type="text"] {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: background-color 0.15s ease;
-}
-
-.edition-item-card:hover {
-  border-color: var(--interactive-accent);
 }
 
 .edition-info {
@@ -1151,4 +1135,154 @@ body.is-mobile .modal.book-search-global-modal input[type="text"] {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+/* Prompt Reset to respect theme borders */
+.prompt,
+.prompt-input-container,
+.prompt-input {
+  border: var(--border-width) solid var(--background-modifier-border) !important;
+  box-shadow: none !important;
+}
+
+/* Barcode Scanner Modal Styling */
+.modal.book-search-barcode-modal {
+  width: 500px;
+  max-width: 95vw;
+  padding: 24px !important;
+}
+
+.book-search-barcode-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.book-search-barcode-icon {
+  color: var(--interactive-accent);
+  margin-bottom: 8px;
+}
+
+.book-search-barcode-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.barcode-scanner-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  background-color: #000;
+  margin-bottom: 20px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.barcode-scanner-container {
+  width: 100%;
+  height: 100%;
+}
+
+.barcode-scanner-container video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+/* Red Scanning Guide Line */
+.barcode-guide-line {
+  position: absolute;
+  top: 50%;
+  left: 10%;
+  width: 80%;
+  height: 2px;
+  background-color: rgba(255, 0, 0, 0.6);
+  box-shadow: 0 0 8px rgba(255, 0, 0, 0.8);
+  z-index: 10;
+  pointer-events: none;
+  animation: scan-line-pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes scan-line-pulse {
+  0% { opacity: 0.4; transform: translateY(-2px); }
+  50% { opacity: 1; transform: translateY(2px); }
+  100% { opacity: 0.4; transform: translateY(-2px); }
+}
+
+.book-search-barcode-controls {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.book-search-barcode-controls button {
+  flex: 1;
+  max-width: 160px;
+}
+
+.error-message {
+  color: var(--text-error);
+  text-align: center;
+  margin: 10px 0;
+}
+
+/* Scan Button INSIDE Search Input - Bulletproof Fix */
+.book-search-input-container {
+  display: flex !important;
+  position: relative !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  z-index: 1 !important;
+}
+
+.book-search-input-container .text-component,
+.book-search-input-container input[type="text"],
+.book-search-input-container input {
+  flex: 1 !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  display: block !important;
+  padding-right: 44px !important; /* Space for icon */
+  box-sizing: border-box !important;
+  caret-color: var(--interactive-accent) !important; /* Force the cursor to be visible */
+  cursor: text !important;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+.book-search-scan-button {
+  position: absolute !important;
+  right: 6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  background-color: transparent !important;
+  color: var(--text-muted) !important;
+  border: none !important;
+  cursor: pointer !important;
+  z-index: 10 !important; /* Keep icon above input but below other UI */
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.book-search-scan-button:hover {
+  color: var(--interactive-accent) !important;
+}
+
+.book-search-scan-button svg {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+body.is-mobile .book-search-input-container {
+  width: 100% !important;
 }

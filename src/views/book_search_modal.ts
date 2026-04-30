@@ -11,7 +11,9 @@ import {
   Setting,
   TextComponent,
   DropdownComponent,
+  setIcon,
 } from "obsidian";
+import { BarcodeScannerModal } from "./barcode_scanner_modal";
 
 export class BookSearchModal extends Modal {
   private readonly SEARCH_BUTTON_TEXT = "Search";
@@ -103,10 +105,27 @@ export class BookSearchModal extends Modal {
     contentEl.createDiv(
       { cls: "book-search-plugin__search-modal--input" },
       (el) => {
-        this.searchInput = new TextComponent(el)
+        const inputContainer = el.createDiv({
+          cls: "book-search-input-container",
+        });
+
+        this.searchInput = new TextComponent(inputContainer)
           .setValue(this.query)
           .setPlaceholder("Search by keyword or ISBN")
           .onChange((value) => (this.query = value));
+
+        const scanButton = inputContainer.createEl("button", {
+          cls: "book-search-scan-button",
+          attr: { title: "Scan barcode" },
+        });
+        setIcon(scanButton, "scan");
+        scanButton.addEventListener("click", () => {
+          new BarcodeScannerModal(this.app, (isbn) => {
+            this.query = isbn;
+            this.searchInput?.setValue(isbn);
+            void this.searchBook();
+          }).open();
+        });
 
         this.searchInput.inputEl.addEventListener("keydown", (event) => {
           if (event.key === "Enter" && !event.isComposing) {
