@@ -341,25 +341,30 @@ body.is-mobile .modal.book-search-global-modal {
   overflow: hidden !important;
 }
 
-body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-header {
+body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-header,
+body.is-mobile .modal.book-search-input-modal .book-search-plugin__modal-header {
   margin-bottom: 8px; /* Reduced from 16px */
 }
 
-body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-icon {
+body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-icon,
+body.is-mobile .modal.book-search-input-modal .book-search-plugin__modal-icon {
   margin-bottom: 4px; /* Reduced from 12px */
 }
 
-body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-icon svg {
+body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-icon svg,
+body.is-mobile .modal.book-search-input-modal .book-search-plugin__modal-icon svg {
   width: 42px; /* Increased from 32px */
   height: 42px;
 }
 
-body.is-mobile .modal.book-search-global-modal .setting-item {
+body.is-mobile .modal.book-search-global-modal .setting-item,
+body.is-mobile .modal.book-search-input-modal .setting-item {
   border: none !important;
   padding: 0 !important;
 }
 
-body.is-mobile .modal.book-search-global-modal .setting-item-control {
+body.is-mobile .modal.book-search-global-modal .setting-item-control,
+body.is-mobile .modal.book-search-input-modal .setting-item-control {
   margin-top: 4px !important;
 }
 
@@ -1135,6 +1140,14 @@ body.is-mobile .book-search-input-container {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+/* Prompt Reset to respect theme borders */
+.prompt,
+.prompt-input-container,
+.prompt-input {
+  border: var(--border-width) solid var(--background-modifier-border) !important;
+  box-shadow: none !important;
 }
 
 /* Prompt Reset to respect theme borders */

@@ -12,6 +12,7 @@ import {
   TextComponent,
   DropdownComponent,
   setIcon,
+  Platform,
 } from "obsidian";
 import { BarcodeScannerModal } from "./barcode_scanner_modal";
 
@@ -85,16 +86,28 @@ export class BookSearchModal extends Modal {
     const service =
       this.serviceProviderId || this.plugin.settings.serviceProvider;
 
-    // Title
-    const titleContainer = contentEl.createDiv({
-      cls: "book-search-plugin__search-modal--title",
+    // Brand Header
+    const headerEl = contentEl.createDiv({
+      cls: "book-search-plugin__modal-header",
     });
-    titleContainer.createEl("strong", {
+    const iconEl = headerEl.createDiv({
+      cls: "book-search-plugin__modal-icon",
+    });
+    setIcon(iconEl, service === "calibre" ? "library-big" : "book-open");
+
+    headerEl.createEl("h2", {
       text:
         (service as string).charAt(0).toUpperCase() +
         (service as string).slice(1),
+      cls: "book-search-plugin__modal-title",
     });
-    titleContainer.createEl("div", { text: "Search book" });
+
+    if (!Platform.isMobile) {
+      headerEl.createEl("div", {
+        text: "Search book",
+        cls: "book-search-plugin__search-modal--subtitle",
+      });
+    }
 
     if (
       (service as ServiceProvider) === ServiceProvider.google &&
@@ -102,19 +115,17 @@ export class BookSearchModal extends Modal {
     )
       this.renderSelectLocale();
 
-    contentEl.createDiv(
-      { cls: "book-search-plugin__search-modal--input" },
-      (el) => {
-        const inputContainer = el.createDiv({
-          cls: "book-search-input-container",
-        });
+    const searchSetting = new Setting(contentEl);
+    if (!Platform.isMobile) {
+      searchSetting.setName("Search").setDesc("Search by keyword or ISBN");
+    }
 
-        this.searchInput = new TextComponent(inputContainer)
-          .setValue(this.query)
-          .setPlaceholder("Search by keyword or ISBN")
-          .onChange((value) => (this.query = value));
-
-        const scanButton = inputContainer.createEl("button", {
+    searchSetting.addText((text) => {
+      this.searchInput = text;
+      const parentEl = text.inputEl.parentElement;
+      if (parentEl) {
+        parentEl.addClass("book-search-input-container");
+        const scanButton = parentEl.createEl("button", {
           cls: "book-search-scan-button",
           attr: { title: "Scan barcode" },
         });
@@ -126,17 +137,22 @@ export class BookSearchModal extends Modal {
             void this.searchBook();
           }).open();
         });
+      }
 
-        this.searchInput.inputEl.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" && !event.isComposing) {
-            void this.searchBook();
-          }
-        });
+      text
+        .setPlaceholder("Search by keyword or ISBN")
+        .setValue(this.query)
+        .onChange((value) => (this.query = value));
 
-        // Focus the input
-        setTimeout(() => this.searchInput?.inputEl.focus(), 50);
-      },
-    );
+      text.inputEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.isComposing) {
+          void this.searchBook();
+        }
+      });
+
+      // Focus the input
+      setTimeout(() => this.searchInput?.inputEl.focus(), 50);
+    });
 
     new Setting(this.contentEl).addButton((btn) => {
       this.okBtnRef = btn

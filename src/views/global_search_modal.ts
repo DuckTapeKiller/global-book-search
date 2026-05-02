@@ -1,4 +1,11 @@
-import { Modal, Notice, Setting, setIcon, Platform } from "obsidian";
+import {
+  Modal,
+  Notice,
+  Setting,
+  setIcon,
+  Platform,
+  TextComponent,
+} from "obsidian";
 import BookSearchPlugin from "@src/main";
 import { globalSearch, BookWithSource } from "@apis/global_search";
 import { BarcodeScannerModal } from "./barcode_scanner_modal";
@@ -8,6 +15,7 @@ export class GlobalSearchModal extends Modal {
   private isBusy = false;
   private isSuccess = false;
   private statusEl!: HTMLElement;
+  private searchInput?: TextComponent;
 
   constructor(
     private plugin: BookSearchPlugin,
@@ -80,6 +88,7 @@ export class GlobalSearchModal extends Modal {
       });
 
       // Auto-focus
+      this.searchInput = text;
       setTimeout(() => text.inputEl.focus(), 50);
     });
 
