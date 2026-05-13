@@ -1,7 +1,7 @@
 {
     "id": "global-book-search",
     "name": "Global Book Search",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "minAppVersion": "0.15.0",
     "description": "Search for books in Google Books, Goodreads, Open Library and local Calibre libraries to create notes.",
     "author": "DuckTapeKiller",

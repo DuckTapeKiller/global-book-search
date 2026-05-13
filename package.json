@@ -1,6 +1,6 @@
 {
   "name": "global-book-search",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Search for books in Google Books, Goodreads, Open Library and local Calibre libraries to create notes.",
   "homepage": "https://github.com/DuckTapeKiller/global-book-search",
   "main": "main.js",
