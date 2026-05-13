@@ -5,7 +5,7 @@
 [![Downloads](https://img.shields.io/github/downloads/DuckTapeKiller/global-book-search/total?logo=obsidian&color=%23483699)](https://github.com/DuckTapeKiller/global-book-search/releases)
 
 
-![Global Book Search Art](https://github.com/user-attachments/assets/8a191a9a-bb79-4348-ae78-a4a21dd560c2)
+![Cover Image](screenshots/cover.png)
 
 # Global Book Search
 
