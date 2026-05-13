@@ -1,0 +1,22 @@
+# Intellij
+*.iml
+.idea/
+
+# npm
+node_modules/
+
+# Build files
+main.js
+*.map
+
+# Obsidian
+data.json
+.obsidian/
+
+# System
+.DS_Store
+
+# Testing and Local
+coverage/
+debug_scraper.js
+test_vault/

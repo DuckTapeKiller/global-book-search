@@ -1,0 +1,71 @@
+{
+  "name": "global-book-search",
+  "version": "1.0.6",
+  "description": "Search for books in Google Books, Goodreads, Open Library and local Calibre libraries to create notes.",
+  "homepage": "https://github.com/DuckTapeKiller/global-book-search",
+  "main": "main.js",
+  "standard-version": {
+    "t": ""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DuckTapeKiller/global-book-search.git"
+  },
+  "keywords": [
+    "book",
+    "book note",
+    "obsidian",
+    "plugin",
+    "goodreads",
+    "calibre"
+  ],
+  "author": "DuckTapeKiller",
+  "license": "MIT",
+  "engines": {
+    "node": ">= 20",
+    "yarn": "please use pnpm",
+    "npm": "please use pnpm",
+    "pnpm": ">= 9.0.0"
+  },
+  "scripts": {
+    "dev": "node --experimental-json-modules esbuild.config.mjs",
+    "test": "jest",
+    "format": "prettier --write \"**/*.ts\"",
+    "format:check": "prettier --check \"**/*.ts\"",
+    "lint": "npm run format:check && eslint . && tsc --noEmit --skipLibCheck",
+    "lint:fix": "npm run format && eslint . --fix",
+    "build": "npm run lint && node esbuild.config.mjs production",
+    "release": "standard-version",
+    "release-test": "standard-version --dry-run",
+    "release-major": "standard-version --release-as major",
+    "release-major-test": "standard-version --dry-run --release-as major",
+    "release-minor": "standard-version --release-as minor",
+    "release-minor-test": "standard-version --dry-run --release-as minor",
+    "prepare": "husky",
+    "deploy:pages": "gh-pages -d pages"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@popperjs/core": "^2.11.8",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.12.7",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "0.26.0",
+    "eslint": "^9.39.2",
+    "gh-pages": "^6.3.0",
+    "globals": "^17.0.0",
+    "husky": "^9.0.11",
+    "jest": "^29.7.0",
+    "obsidian": "latest",
+    "prettier": "^3.2.5",
+    "standard-version": "^9.5.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tslib": "2.6.2",
+    "typescript": "5.1.6",
+    "typescript-eslint": "^8.52.0"
+  },
+  "dependencies": {
+    "html5-qrcode": "^2.3.8"
+  }
+}
