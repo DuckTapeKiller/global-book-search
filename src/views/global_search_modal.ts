@@ -115,7 +115,7 @@ export class GlobalSearchModal extends Modal {
 
       // Auto-focus
       this.searchInput = text;
-      setTimeout(() => text.inputEl.focus(), 50);
+      window.setTimeout(() => text.inputEl.focus(), 50);
     });
 
     this.statusEl = this.contentEl.createDiv({

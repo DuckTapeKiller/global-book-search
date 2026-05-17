@@ -27,7 +27,7 @@ const PROVIDER_ORDER = ["goodreads", "google", "openlibrary", "storygraph"];
 
 async function timeoutReject<T>(ms: number, providerName: string): Promise<T> {
   return new Promise((_, reject) => {
-    setTimeout(
+    window.setTimeout(
       () =>
         reject(new Error(`Provider ${providerName} timed out after ${ms}ms`)),
       ms,
@@ -71,7 +71,7 @@ async function fetchFableData(
         { providerId: "fable", purpose: "enrich", cacheTtlMs: 300_000 },
       ),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Fable timeout")), 6000),
+        window.setTimeout(() => reject(new Error("Fable timeout")), 6000),
       ),
     ]);
 
@@ -134,7 +134,7 @@ async function fetchLocData(
         { providerId: "loc", purpose: "enrich", cacheTtlMs: 600_000 },
       ),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("LoC timeout")), 6000),
+        window.setTimeout(() => reject(new Error("LoC timeout")), 6000),
       ),
     ]);
 
@@ -831,8 +831,7 @@ function mergeWithConflicts(
   ];
 
   fieldsToTrack.forEach((field) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const allValues: { value: any; source: string }[] = [];
+    const allValues: { value: unknown; source: string }[] = [];
 
     // Add primary source value
     if (primary[field.name]) {
@@ -907,8 +906,8 @@ function mergeWithConflicts(
   for (const field of mergeFields) {
     const preferred = pickPreferredValue(field);
     if (!preferred) continue;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (result as any)[field] = preferred.value as any;
+    (result as unknown as Record<string, unknown>)[field as string] =
+      preferred.value;
     if (preferred.sourceLabel) contributingSources.add(preferred.sourceLabel);
   }
 

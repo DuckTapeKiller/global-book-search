@@ -64,8 +64,9 @@ export class ConflictResolverModal extends Modal {
         }
 
         radio.addEventListener("change", () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (this.resolvedBook as any)[conflict.fieldName] = v.value;
+          (this.resolvedBook as unknown as Record<string, unknown>)[
+            conflict.fieldName
+          ] = v.value;
           optionsContainer
             .querySelectorAll(".conflict-option-card")
             .forEach((el) => el.removeClass("is-selected"));

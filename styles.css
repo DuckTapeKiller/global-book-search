@@ -33,6 +33,12 @@
   align-items: flex-start;
 }
 
+.book-search-plugin__settings-button-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .book-search-plugin__settings .setting-item-info {
   flex: 1 1 auto;
 }

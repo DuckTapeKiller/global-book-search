@@ -28,14 +28,14 @@ export class EnrichmentProgressModal extends Modal {
     if (this.spinnerEl) this.spinnerEl.addClass("is-done");
     this.setStatus(message);
     // Auto-close after 1200ms
-    setTimeout(() => this.close(), 1200);
+    window.setTimeout(() => this.close(), 1200);
   }
 
   markError(message: string) {
     if (this.spinnerEl) this.spinnerEl.addClass("is-error");
     this.setStatus(message);
     // Auto-close after 2500ms
-    setTimeout(() => this.close(), 2500);
+    window.setTimeout(() => this.close(), 2500);
   }
 
   onClose() {

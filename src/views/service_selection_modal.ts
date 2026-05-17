@@ -44,22 +44,26 @@ export class ServiceSelectionModal extends Modal {
       cls: "mod-cta book-search-global-btn",
     });
 
-    globalBtn.addEventListener("click", async () => {
-      if (Platform.isDesktop) {
-        this.close();
-        this.plugin.createNewBookNoteGlobal().catch((err) => console.warn(err));
-        return;
-      }
-      const closePromise = this.animateClose();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      try {
-        await this.plugin.createNewBookNoteGlobal();
-      } catch (err) {
-        if ((err as Error).message !== "Cancelled request") console.warn(err);
-      } finally {
-        await closePromise;
-        this.close();
-      }
+    globalBtn.addEventListener("click", () => {
+      void (async () => {
+        if (Platform.isDesktop) {
+          this.close();
+          this.plugin
+            .createNewBookNoteGlobal()
+            .catch((err) => console.warn(err));
+          return;
+        }
+        const closePromise = this.animateClose();
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+        try {
+          await this.plugin.createNewBookNoteGlobal();
+        } catch (err) {
+          if ((err as Error).message !== "Cancelled request") console.warn(err);
+        } finally {
+          await closePromise;
+          this.close();
+        }
+      })();
     });
 
     // 2. Calibre (Always)
@@ -68,24 +72,26 @@ export class ServiceSelectionModal extends Modal {
       cls: "mod-cta",
     });
 
-    calibreBtn.addEventListener("click", async () => {
-      if (Platform.isDesktop) {
-        this.close();
-        this.plugin
-          .createMultipleCalibreNotes()
-          .catch((err) => console.warn(err));
-        return;
-      }
-      const closePromise = this.animateClose();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      try {
-        await this.plugin.createMultipleCalibreNotes();
-      } catch (err) {
-        if ((err as Error).message !== "Cancelled request") console.warn(err);
-      } finally {
-        await closePromise;
-        this.close();
-      }
+    calibreBtn.addEventListener("click", () => {
+      void (async () => {
+        if (Platform.isDesktop) {
+          this.close();
+          this.plugin
+            .createMultipleCalibreNotes()
+            .catch((err) => console.warn(err));
+          return;
+        }
+        const closePromise = this.animateClose();
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+        try {
+          await this.plugin.createMultipleCalibreNotes();
+        } catch (err) {
+          if ((err as Error).message !== "Cancelled request") console.warn(err);
+        } finally {
+          await closePromise;
+          this.close();
+        }
+      })();
     });
 
     // 2b. Bulk Import (Always)
@@ -121,33 +127,35 @@ export class ServiceSelectionModal extends Modal {
           btn.createSpan({ text: ` (${health})` });
         }
 
-        btn.addEventListener("click", async () => {
-          if (Platform.isDesktop) {
-            this.close();
-            this.plugin
-              .createNewBookNote(service.value)
-              .catch((err) => console.warn(err));
-            return;
-          }
-
-          const closePromise = this.animateClose();
-          await new Promise((resolve) => setTimeout(resolve, 50));
-
-          try {
-            await new Promise<void>((resolve, reject) => {
-              setTimeout(() => {
-                const action = this.plugin.createNewBookNote(service.value);
-                action.then(resolve).catch(reject);
-              }, 10);
-            });
-          } catch (err) {
-            if (err.message !== "Cancelled request") {
-              console.warn(err);
+        btn.addEventListener("click", () => {
+          void (async () => {
+            if (Platform.isDesktop) {
+              this.close();
+              this.plugin
+                .createNewBookNote(service.value)
+                .catch((err) => console.warn(err));
+              return;
             }
-          } finally {
-            await closePromise;
-            this.close();
-          }
+
+            const closePromise = this.animateClose();
+            await new Promise((resolve) => window.setTimeout(resolve, 50));
+
+            try {
+              await new Promise<void>((resolve, reject) => {
+                window.setTimeout(() => {
+                  const action = this.plugin.createNewBookNote(service.value);
+                  action.then(resolve).catch(reject);
+                }, 10);
+              });
+            } catch (err) {
+              if (err.message !== "Cancelled request") {
+                console.warn(err);
+              }
+            } finally {
+              await closePromise;
+              this.close();
+            }
+          })();
         });
       });
     }
@@ -157,7 +165,7 @@ export class ServiceSelectionModal extends Modal {
   async animateClose(): Promise<void> {
     this.modalEl.addClass("is-closing");
     // Wait for animation duration (250ms)
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
   }
 
   onClose() {

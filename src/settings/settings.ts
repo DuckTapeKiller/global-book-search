@@ -401,7 +401,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createFileNameFormatSetting(containerEl) {
-    const desc = document.createDocumentFragment();
+    const desc = activeDocument.createDocumentFragment();
     desc.createSpan({ text: "Enter the file name format. Example: " });
     const newFileNameHint = desc.createEl("code", {
       text:
@@ -432,13 +432,11 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createFrontmatterSetting(containerEl: HTMLElement) {
-    const desc = document.createDocumentFragment();
+    const desc = activeDocument.createDocumentFragment();
     desc.createDiv({ text: "The frontmatter that is inserted into the text." });
 
     const buttonContainer = desc.createDiv();
-    buttonContainer.style.display = "flex";
-    buttonContainer.style.gap = "8px";
-    buttonContainer.style.marginTop = "8px";
+    buttonContainer.addClass("book-search-plugin__settings-button-group");
 
     const restoreButton = buttonContainer.createEl("button", {
       text: "Restore default",
@@ -725,7 +723,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createGoogleApiSettings(containerEl: HTMLElement) {
-    const googleDesc = document.createDocumentFragment();
+    const googleDesc = activeDocument.createDocumentFragment();
     googleDesc.createEl("div", {
       text: "If you get 'Request Failed, status 429', it means you have reached the daily limit of the shared API key.",
     });
@@ -755,7 +753,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
         });
       });
 
-    const googleAPISetDesc = document.createDocumentFragment();
+    const googleAPISetDesc = activeDocument.createDocumentFragment();
     googleAPISetDesc.createDiv({ text: "Set your Books API key." });
     googleAPISetDesc.createDiv({
       text: "For security reason, saved API key is not shown in this textarea after saved.",
@@ -1168,7 +1166,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createTemplateFileSetting(containerEl: HTMLElement) {
-    const templateFileDesc = document.createDocumentFragment();
+    const templateFileDesc = activeDocument.createDocumentFragment();
     templateFileDesc.createDiv({
       text: "Files will be available as templates.",
     });

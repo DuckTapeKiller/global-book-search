@@ -151,7 +151,7 @@ export class BookSearchModal extends Modal {
       });
 
       // Focus the input
-      setTimeout(() => this.searchInput?.inputEl.focus(), 50);
+      window.setTimeout(() => this.searchInput?.inputEl.focus(), 50);
     });
 
     new Setting(this.contentEl).addButton((btn) => {

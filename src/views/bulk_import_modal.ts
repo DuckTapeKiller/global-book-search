@@ -76,20 +76,22 @@ export class BulkImportModal extends Modal {
 
     const actions = new Setting(this.contentEl).setName("Actions");
     actions.addButton((btn) =>
-      btn.setButtonText("Paste clipboard").onClick(async () => {
-        try {
-          if (!navigator.clipboard?.readText) {
-            new Notice("Clipboard API not available.");
-            return;
+      btn.setButtonText("Paste clipboard").onClick(() => {
+        void (async () => {
+          try {
+            if (!navigator.clipboard?.readText) {
+              new Notice("Clipboard API not available.");
+              return;
+            }
+            const text = await navigator.clipboard.readText();
+            this.raw = text || "";
+            this.textArea?.setValue(this.raw);
+          } catch (err) {
+            new Notice(
+              `Clipboard read failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
-          const text = await navigator.clipboard.readText();
-          this.raw = text || "";
-          this.textArea?.setValue(this.raw);
-        } catch (err) {
-          new Notice(
-            `Clipboard read failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+        })();
       }),
     );
 

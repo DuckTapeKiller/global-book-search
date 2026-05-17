@@ -48,7 +48,7 @@ const MAX_RETRIES = 2;
 const RETRY_DELAY = 1000;
 
 async function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export async function apiGet<T>(

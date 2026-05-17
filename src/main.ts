@@ -148,7 +148,7 @@ export default class BookSearchPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "global-book-search",
+      id: "search-all",
       name: "Global Search (all sources)",
       callback: () => {
         void this.createNewBookNoteGlobal().catch((err) => console.warn(err));

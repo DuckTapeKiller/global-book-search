@@ -54,7 +54,7 @@ function now(): number {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function getHost(url: string): string {
@@ -100,8 +100,7 @@ function parseJsonOrThrow(args: {
     const message = `Failed to parse JSON (${providerId}${purpose ? `:${purpose}` : ""}) status=${status} content-type=${contentType} url=${url} preview=${JSON.stringify(preview)}`;
     const wrapped = new Error(message);
     // Preserve original error without relying on newer `ErrorOptions.cause`.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (wrapped as any).cause = err;
+    (wrapped as unknown as Record<string, unknown>).cause = err;
     throw wrapped;
   }
 }
@@ -193,8 +192,7 @@ export async function httpRequest(
           // Preserve status on the thrown error so the outer handler can record
           // provider health once, consistently.
           if (typeof err === "object" && err !== null) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (err as any).status = res.status;
+            (err as unknown as Record<string, unknown>).status = res.status;
           }
           throw err;
         }
@@ -253,11 +251,11 @@ export async function httpRequest(
     } catch (err: unknown) {
       lastError = err;
 
-      const status =
+      const status = (
         typeof err === "object" && err !== null && "status" in err
-          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (err as any).status
-          : undefined;
+          ? (err as Record<string, unknown>).status
+          : undefined
+      ) as number | undefined;
 
       recordProviderFailure(providerId, err, status);
 

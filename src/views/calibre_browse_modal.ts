@@ -85,20 +85,22 @@ export class CalibreBrowseModal extends Modal {
     setIcon(tab, icon);
     tab.createSpan({ text: label });
 
-    tab.addEventListener("click", async () => {
-      this.currentMode = mode;
-      this.selectedFilter = null;
-      this.books = [];
-      this.selectedBooks.clear();
-      this.updateCount();
+    tab.addEventListener("click", () => {
+      void (async () => {
+        this.currentMode = mode;
+        this.selectedFilter = null;
+        this.books = [];
+        this.selectedBooks.clear();
+        this.updateCount();
 
-      // Update active tab
-      container.querySelectorAll(".calibre-browse-tab").forEach((t) => {
-        t.removeClass("is-active");
-      });
-      tab.addClass("is-active");
+        // Update active tab
+        container.querySelectorAll(".calibre-browse-tab").forEach((t) => {
+          t.removeClass("is-active");
+        });
+        tab.addClass("is-active");
 
-      await this.renderContent();
+        await this.renderContent();
+      })();
     });
   }
 
@@ -168,9 +170,11 @@ export class CalibreBrowseModal extends Modal {
         });
       }
 
-      row.addEventListener("click", async () => {
-        this.selectedFilter = item.name;
-        await this.renderContent();
+      row.addEventListener("click", () => {
+        void (async () => {
+          this.selectedFilter = item.name;
+          await this.renderContent();
+        })();
       });
     });
   }
@@ -183,10 +187,12 @@ export class CalibreBrowseModal extends Modal {
       cls: "calibre-browse-back",
       text: `← Back to ${this.currentMode}`,
     });
-    backBtn.addEventListener("click", async () => {
-      this.selectedFilter = null;
-      this.books = [];
-      await this.renderContent();
+    backBtn.addEventListener("click", () => {
+      void (async () => {
+        this.selectedFilter = null;
+        this.books = [];
+        await this.renderContent();
+      })();
     });
 
     this.contentArea.createEl("h3", { text: this.selectedFilter });

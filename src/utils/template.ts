@@ -60,7 +60,10 @@ export function applyTemplateTransformations(
   );
 }
 
-export function executeInlineScriptsTemplates(book: Book, text: string) {
+export function executeInlineScriptsTemplates(
+  book: Book,
+  text: string,
+): string {
   if (!text?.includes("<%=")) return text;
 
   // Non-greedy and multiline-safe to support multiple inline expressions per template.
@@ -68,21 +71,40 @@ export function executeInlineScriptsTemplates(book: Book, text: string) {
 
   return text.replace(commandRegex, (matched: string, script: string) => {
     try {
-      // Direct Function usage enables user-authored templates to render dynamic values.
-      // Note: This is intentionally powerful and should only ever be evaluated on
-      // user-controlled template text (never on substituted remote metadata).
-      const func = new Function(
-        "book",
-        [
-          '"use strict"',
-          `const output = (${script})`,
-          'if (typeof output === "string") return output',
-          "return JSON.stringify(output)",
-        ].join(";"),
-      );
-      return func(book) as string;
+      const path = script.trim();
+      // Only support simple property access on 'book', e.g., 'book.title' or 'book.authors[0]'
+      if (!path.startsWith("book.") && path !== "book") {
+        console.warn(
+          `[Global Book Search] Unsupported template expression: ${path}. Only 'book' property access is supported.`,
+        );
+        return matched;
+      }
+
+      const cleanPath = path
+        .replace(/^book\.?/, "")
+        .replace(/\[['"]?(\w+)['"]?\]/g, ".$1");
+      if (!cleanPath) {
+        return typeof book === "string" ? book : JSON.stringify(book);
+      }
+
+      const keys = cleanPath.split(".").filter(Boolean);
+      let current: unknown = book;
+
+      for (const key of keys) {
+        if (current === undefined || current === null) {
+          return "";
+        }
+        current = (current as Record<string, unknown>)[key];
+      }
+
+      if (current === undefined || current === null) return "";
+      if (typeof current === "string") return current;
+      return JSON.stringify(current);
     } catch (err) {
-      console.warn(err);
+      console.warn(
+        `[Global Book Search] Failed to parse template expression: ${script}`,
+        err,
+      );
       return matched;
     }
   });
