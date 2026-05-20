@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: write
+  attestations: write
+  id-token: write
+  artifact-metadata: write
 
 env:
   PLUGIN_NAME: global-book-search
@@ -52,6 +55,13 @@ jobs:
         run: |
           node --experimental-json-modules esbuild.config.mjs production
           ls -la
+
+      - name: Attest build provenance (main.js, styles.css)
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            ${{ github.workspace }}/main.js
+            ${{ github.workspace }}/styles.css
 
       - name: Create Release
         id: create_release

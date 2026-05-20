@@ -14,11 +14,11 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-.book-search-plugin__header {
+body .book-search-plugin__header.book-search-plugin__header {
   border-bottom: var(--border-width) solid var(--interactive-accent);
   padding-bottom: 12px;
-  margin-top: 32px !important;
-  margin-bottom: 20px !important;
+  margin-top: 32px;
+  margin-bottom: 20px;
   opacity: 0.9;
 }
 
@@ -52,8 +52,8 @@
   resize: vertical;
 }
 
-.setting-item-control:has(.book-search-plugin__settings--textarea) {
-  justify-content: flex-end;
+body .book-search-plugin__settings .book-search-plugin__settings--textarea.book-search-plugin__settings--textarea {
+  margin-left: auto;
 }
 
 .book-search-plugin__settings--new_file_name {
@@ -116,18 +116,18 @@
 }
 
 /* Service Selection Modal Styling */
-.modal.book-search-service-selection-modal,
-.modal.book-search-input-modal,
-.modal.book-search-global-modal {
-  width: 340px !important;
-  height: auto !important;
+body .modal.book-search-service-selection-modal.modal.book-search-service-selection-modal,
+body .modal.book-search-input-modal.modal.book-search-input-modal,
+body .modal.book-search-global-modal.modal.book-search-global-modal {
+  width: 340px;
+  height: auto;
   max-width: 90vw;
-  padding: 32px !important;
+  padding: 32px;
   box-shadow: var(--bsp-shadow);
-  border-radius: var(--modal-radius) !important;
+  border-radius: var(--modal-radius);
   animation: bsp-fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   position: relative;
-  overflow: visible !important;
+  overflow: visible;
 }
 
 /* Modal Progress Fill Effect */
@@ -149,29 +149,6 @@
   border-top: var(--border-width) solid var(--interactive-accent);
 }
 
-.modal.book-search-global-modal .modal-close-button {
-  z-index: 9999 !important;
-  display: flex !important;
-  opacity: 1 !important;
-  background-color: hsla(0, 0%, 50%, 0.1) !important; /* Subtle diagnostic circle */
-  border-radius: 50%;
-  padding: 4px;
-}
-
-.modal.book-search-global-modal .modal-close-button svg {
-  display: block !important;
-  color: var(--text-normal) !important;
-  width: 24px !important;
-  height: 24px !important;
-  overflow: visible !important;
-}
-
-.modal.book-search-global-modal .modal-close-button svg path {
-  stroke: var(--text-normal) !important;
-  stroke-width: 2px !important;
-  display: block !important;
-}
-
 /* Modal Branding Header */
 .book-search-plugin__modal-header {
   display: flex;
@@ -191,46 +168,46 @@
   stroke-width: 1.5px;
 }
 
-.book-search-plugin__modal-title {
-  font-size: 1.5em !important;
-  font-weight: var(--font-bold) !important;
-  margin: 0 !important;
+body .book-search-plugin__modal-title.book-search-plugin__modal-title {
+  font-size: 1.5em;
+  font-weight: var(--font-bold);
+  margin: 0;
   color: var(--text-accent);
   letter-spacing: -0.01em;
 }
 
 /* Mobile Overrides: Bottom Sheet Style */
-body.is-mobile .modal.book-search-service-selection-modal {
+body.is-mobile .modal.book-search-service-selection-modal.modal.book-search-service-selection-modal {
   /* Reset dimensions & Centering overrides */
-  width: 100vw !important;
-  max-width: 100vw !important;
-  height: auto !important;
-  min-height: unset !important;
-  max-height: 80vh !important;
-  aspect-ratio: unset !important;
-  margin: 0 !important;
-  top: auto !important;
+  width: 100vw;
+  max-width: 100vw;
+  height: auto;
+  min-height: unset;
+  max-height: 80vh;
+  aspect-ratio: unset;
+  margin: 0;
+  top: auto;
 
   /* Position at bottom */
-  position: fixed !important;
-  bottom: 0 !important;
-  left: 0 !important;
+  position: fixed;
+  bottom: 0;
+  left: 0;
 
   /* Styling: Inherit theme radius/background */
-  border-radius: var(--modal-radius, 0) !important;
+  border-radius: var(--modal-radius, 0);
   /* Use theme var, fallback to 0 if missing, but DO NOT force 0 if theme says 4px */
-  border-bottom-left-radius: 0 !important;
+  border-bottom-left-radius: 0;
   /* Bottom must be flat for sheet */
-  border-bottom-right-radius: 0 !important;
+  border-bottom-right-radius: 0;
 
-  border-bottom: none !important;
+  border-bottom: none;
   background-color: var(--modal-background);
-  padding: 24px !important;
+  padding: 24px;
 
   /* Layout */
-  display: flex !important;
-  flex-direction: column !important;
-  justify-content: flex-start !important;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
 
   /* Animation */
   animation: mobile-slide-up 0.25s cubic-bezier(0.1, 0.9, 0.2, 1.0) forwards;
@@ -309,8 +286,8 @@ body.is-mobile .modal.book-search-service-selection-modal {
 }
 
 /* Closing Animation */
-body.is-mobile .modal.book-search-service-selection-modal.is-closing {
-  animation: mobile-slide-down 0.25s cubic-bezier(0.1, 0.9, 0.2, 1.0) forwards !important;
+body.is-mobile .modal.book-search-service-selection-modal.modal.book-search-service-selection-modal.is-closing {
+  animation: mobile-slide-down 0.25s cubic-bezier(0.1, 0.9, 0.2, 1.0) forwards;
 }
 
 @keyframes mobile-slide-down {
@@ -326,25 +303,24 @@ body.is-mobile .modal.book-search-service-selection-modal.is-closing {
 }
 
 /* Mobile Search Modal Positioning - Keyboard Clearance */
-body.is-mobile .modal.book-search-input-modal,
-body.is-mobile .modal.book-search-global-modal {
+body.is-mobile .modal.book-search-input-modal.modal.book-search-input-modal,
+body.is-mobile .modal.book-search-global-modal.modal.book-search-global-modal {
   /* Ensure modal fits on small screens */
-  width: 90vw !important;
-  max-width: 400px !important;
+  max-width: 400px;
 
   /* Move slightly lower but keep high enough for keyboard */
-  position: fixed !important;
-  top: 70px !important;
-  bottom: auto !important;
+  position: fixed;
+  top: 70px;
+  bottom: auto;
 
-  left: 5% !important;
-  right: 5% !important;
-  width: 90% !important;
-  transform: none !important;
-  margin: 0 !important;
-  padding: 20px 24px !important; /* Reduced from 32px */
-  animation: none !important; /* Rule out animation glitches */
-  overflow: hidden !important;
+  left: 5%;
+  right: 5%;
+  width: 90%;
+  transform: none;
+  margin: 0;
+  padding: 20px 24px; /* Reduced from 32px */
+  animation: none; /* Rule out animation glitches */
+  overflow: hidden;
 }
 
 body.is-mobile .modal.book-search-global-modal .book-search-plugin__modal-header,
@@ -363,15 +339,15 @@ body.is-mobile .modal.book-search-input-modal .book-search-plugin__modal-icon sv
   height: 42px;
 }
 
-body.is-mobile .modal.book-search-global-modal .setting-item,
-body.is-mobile .modal.book-search-input-modal .setting-item {
-  border: none !important;
-  padding: 0 !important;
+body.is-mobile .modal.book-search-global-modal.modal.book-search-global-modal .setting-item.setting-item,
+body.is-mobile .modal.book-search-input-modal.modal.book-search-input-modal .setting-item.setting-item {
+  border: none;
+  padding: 0;
 }
 
-body.is-mobile .modal.book-search-global-modal .setting-item-control,
-body.is-mobile .modal.book-search-input-modal .setting-item-control {
-  margin-top: 4px !important;
+body.is-mobile .modal.book-search-global-modal.modal.book-search-global-modal .setting-item-control.setting-item-control,
+body.is-mobile .modal.book-search-input-modal.modal.book-search-input-modal .setting-item-control.setting-item-control {
+  margin-top: 4px;
 }
 
 /* ============================================= */
@@ -739,9 +715,9 @@ body.is-mobile .calibre-multi-select-list {
 }
 
 /* Mobile adjustments */
-body.is-mobile .book-search-plugin__settings--textarea {
-  min-width: 0 !important;
-  width: 100% !important;
+body.is-mobile .book-search-plugin__settings--textarea.book-search-plugin__settings--textarea {
+  min-width: 0;
+  width: 100%;
 }
 
 body.is-mobile .book-search-plugin__settings .setting-item-control input[type="text"],
@@ -753,8 +729,8 @@ body.is-mobile .book-search-input-modal .setting-item-control .search-input,
 body.is-mobile .book-search-global-modal .setting-item-control input[type="text"],
 body.is-mobile .book-search-global-modal .setting-item-control input[type="search"],
 body.is-mobile .book-search-global-modal .setting-item-control .search-input {
-  width: 100% !important;
-  max-width: 100% !important;
+  width: 100%;
+  max-width: 100%;
 }
 
 body.is-mobile .book-search-input-modal .setting-item,
@@ -804,37 +780,37 @@ body.is-mobile .modal.calibre-browse-modal {
 
 .book-source-badge--goodreads {
   background: linear-gradient(135deg, #c07a40 0%, #8b5a2b 100%);
-  color: #ffffff !important;
+  color: #ffffff;
   border: none;
 }
 
 .book-source-badge--google {
   background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
-  color: #ffffff !important;
+  color: #ffffff;
   border: none;
 }
 
 .book-source-badge--openlibrary {
   background: linear-gradient(135deg, #e8511a 0%, #b03d14 100%);
-  color: #ffffff !important;
+  color: #ffffff;
   border: none;
 }
 
 .book-source-badge--storygraph {
   background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
-  color: #ffffff !important;
+  color: #ffffff;
   border: none;
 }
 
 .book-source-badge--calibre {
   background: linear-gradient(135deg, #16a34a 0%, #116e33 100%);
-  color: #ffffff !important;
+  color: #ffffff;
   border: none;
 }
 
 .book-source-badge--fable {
   background: linear-gradient(135deg, #0d7663 0%, #064e42 100%);
-  color: #ffffff !important;
+  color: #ffffff;
   border: none;
 }
 
@@ -901,36 +877,36 @@ body.is-mobile .modal.calibre-browse-modal {
 }
 
 /* Override Obsidian Setting defaults to be vertical/centered */
-.book-search-input-modal .setting-item,
-.book-search-global-modal .setting-item {
+body .modal.book-search-input-modal.book-search-input-modal .setting-item.setting-item,
+body .modal.book-search-global-modal.book-search-global-modal .setting-item.setting-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   border: none;
-  padding: 0 !important;
-  margin: 0 !important;
+  padding: 0;
+  margin: 0;
   width: 100%;
 }
 
-.book-search-input-modal .setting-item-info,
-.book-search-global-modal .setting-item-info {
-  margin: 0 0 4px 0 !important;
-  text-align: center !important;
-  width: 100% !important;
+body .modal.book-search-input-modal.book-search-input-modal .setting-item-info.setting-item-info,
+body .modal.book-search-global-modal.book-search-global-modal .setting-item-info.setting-item-info {
+  margin: 0 0 4px 0;
+  text-align: center;
+  width: 100%;
 }
 
-.book-search-input-modal .setting-item-control,
-.book-search-global-modal .setting-item-control {
+body .modal.book-search-input-modal.book-search-input-modal .setting-item-control.setting-item-control,
+body .modal.book-search-global-modal.book-search-global-modal .setting-item-control.setting-item-control {
   display: flex;
-  justify-content: center !important;
-  width: 100% !important;
+  justify-content: center;
+  width: 100%;
 }
 
-.book-search-global-subtitle {
-  text-align: center !important;
-  width: 100% !important;
-  display: block !important;
+body .book-search-global-subtitle.book-search-global-subtitle {
+  text-align: center;
+  width: 100%;
+  display: block;
 }
 
 .book-search-input-modal input[type="text"],
@@ -949,10 +925,10 @@ body.is-mobile .book-search-global-modal input[type="text"] {
 }
 
 /* Search button below input */
-.book-search-input-modal button.mod-cta,
-.book-search-global-modal button.mod-cta {
+body .modal.book-search-input-modal.book-search-input-modal button.mod-cta,
+body .modal.book-search-global-modal.book-search-global-modal button.mod-cta {
   display: block;
-  margin: 4px auto 0 auto !important;
+  margin: 4px auto 0 auto;
   min-width: 120px;
 }
 
@@ -968,24 +944,24 @@ body.is-mobile .book-search-global-status {
   margin-top: 4px;
 }
 
-body.is-mobile .book-search-input-modal button.mod-cta,
-body.is-mobile .book-search-global-modal button.mod-cta {
-  margin-top: 4px !important;
-  width: 100% !important;
+body.is-mobile .modal.book-search-input-modal.book-search-input-modal button.mod-cta,
+body.is-mobile .modal.book-search-global-modal.book-search-global-modal button.mod-cta {
+  margin-top: 4px;
+  width: 100%;
 }
 
-body.is-mobile .modal.book-search-input-modal .modal-content,
-body.is-mobile .modal.book-search-global-modal .modal-content {
-  width: 100% !important;
-  padding-left: 8px !important;
-  padding-right: 8px !important;
+body.is-mobile .modal.book-search-input-modal.book-search-input-modal .modal-content.modal-content,
+body.is-mobile .modal.book-search-global-modal.book-search-global-modal .modal-content.modal-content {
+  width: 100%;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
-body.is-mobile .modal.book-search-input-modal .book-search-input-container input[type="text"],
-body.is-mobile .modal.book-search-global-modal .book-search-input-container input[type="text"] {
-  width: 0 !important; /* Let flex-grow handle it */
-  flex: 1 !important;
-  max-width: 320px !important; /* Reduced width as requested */
+body.is-mobile .modal.book-search-input-modal.book-search-input-modal .book-search-input-container input[type="text"],
+body.is-mobile .modal.book-search-global-modal.book-search-global-modal .book-search-input-container input[type="text"] {
+  width: 0; /* Let flex-grow handle it */
+  flex: 1;
+  max-width: 320px; /* Reduced width as requested */
 }
 
 body.is-mobile .book-search-input-container {
@@ -1002,8 +978,8 @@ body.is-mobile .book-search-input-container {
 }
 
 /* Accuracy Suite Modals */
-.book-search-accuracy-modal {
-  width: 500px !important;
+body .book-search-accuracy-modal.book-search-accuracy-modal {
+  width: 500px;
   max-width: 90vw;
 }
 
@@ -1139,7 +1115,7 @@ body.is-mobile .book-search-input-container {
 
 .quorum-tag {
   background-color: #fbbf24;
-  color: #000000 !important;
+  color: #000000;
   padding: 3px 8px;
   border-radius: var(--radius-s);
   font-size: 0.85em;
@@ -1174,26 +1150,18 @@ body.is-mobile .book-search-input-container {
 }
 
 /* Prompt Reset to respect theme borders */
-.prompt,
-.prompt-input-container,
-.prompt-input {
-  border: var(--border-width) solid var(--background-modifier-border) !important;
-  box-shadow: none !important;
-}
-
-/* Prompt Reset to respect theme borders */
-.prompt,
-.prompt-input-container,
-.prompt-input {
-  border: var(--border-width) solid var(--background-modifier-border) !important;
-  box-shadow: none !important;
+body .prompt.prompt,
+body .prompt-input-container.prompt-input-container,
+body .prompt-input.prompt-input {
+  border: var(--border-width) solid var(--background-modifier-border);
+  box-shadow: none;
 }
 
 /* Barcode Scanner Modal Styling */
-.modal.book-search-barcode-modal {
+body .modal.book-search-barcode-modal.modal.book-search-barcode-modal {
   width: 500px;
   max-width: 95vw;
-  padding: 24px !important;
+  padding: 24px;
 }
 
 .book-search-barcode-header {
@@ -1229,10 +1197,10 @@ body.is-mobile .book-search-input-container {
   height: 100%;
 }
 
-.barcode-scanner-container video {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
+body .barcode-scanner-container.barcode-scanner-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* Red Scanning Guide Line */
@@ -1274,61 +1242,73 @@ body.is-mobile .book-search-input-container {
 }
 
 /* Scan Button INSIDE Search Input - Bulletproof Fix */
-.book-search-input-container {
-  display: flex !important;
-  position: relative !important;
-  width: 100% !important;
-  min-width: 100% !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  z-index: 1 !important;
+body .modal.book-search-input-modal.book-search-input-modal .book-search-input-container.book-search-input-container,
+body .modal.book-search-global-modal.book-search-global-modal .book-search-input-container.book-search-input-container {
+  display: flex;
+  position: relative;
+  width: 100%;
+  min-width: 100%;
+  margin: 0;
+  padding: 0;
+  z-index: 1;
 }
 
-.book-search-input-container .text-component,
-.book-search-input-container input[type="text"],
-.book-search-input-container input {
-  flex: 1 !important;
-  width: 100% !important;
-  min-width: 100% !important;
-  display: block !important;
-  padding-right: 44px !important; /* Space for icon */
-  box-sizing: border-box !important;
-  caret-color: var(--interactive-accent) !important; /* Force the cursor to be visible */
-  cursor: text !important;
-  -webkit-user-select: text !important;
-  user-select: text !important;
+body .modal.book-search-input-modal.book-search-input-modal .book-search-input-container.book-search-input-container .text-component,
+body .modal.book-search-global-modal.book-search-global-modal .book-search-input-container.book-search-input-container .text-component,
+body .modal.book-search-input-modal.book-search-input-modal .book-search-input-container.book-search-input-container input[type="text"],
+body .modal.book-search-global-modal.book-search-global-modal .book-search-input-container.book-search-input-container input[type="text"],
+body .modal.book-search-input-modal.book-search-input-modal .book-search-input-container.book-search-input-container input,
+body .modal.book-search-global-modal.book-search-global-modal .book-search-input-container.book-search-input-container input {
+  flex: 1;
+  width: 100%;
+  min-width: 100%;
+  display: block;
+  padding-right: calc(var(--input-height, 36px) + var(--size-4-1, 4px)); /* Space for scan icon */
+  box-sizing: border-box;
+  caret-color: var(--interactive-accent); /* Force the cursor to be visible */
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
-.book-search-scan-button {
-  position: absolute !important;
-  right: 6px !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 32px !important;
-  height: 32px !important;
-  background-color: transparent !important;
-  color: var(--text-muted) !important;
-  border: none !important;
-  cursor: pointer !important;
-  z-index: 10 !important; /* Keep icon above input but below other UI */
-  padding: 0 !important;
-  margin: 0 !important;
+body .modal.book-search-input-modal.book-search-input-modal .book-search-scan-button.book-search-scan-button,
+body .modal.book-search-global-modal.book-search-global-modal .book-search-scan-button.book-search-scan-button {
+  position: absolute;
+  right: var(--size-4-1, 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--input-height, 36px) - var(--size-2-2, 4px));
+  height: calc(var(--input-height, 36px) - var(--size-2-2, 4px));
+  background-color: transparent;
+  border-radius: var(--clickable-icon-radius, var(--radius-s, 4px));
+  color: var(--icon-color, var(--text-muted));
+  opacity: var(--icon-opacity, 1);
+  border: none;
+  cursor: pointer;
+  z-index: 10; /* Keep icon above input but below other UI */
+  padding: 0;
+  margin: 0;
 }
 
-.book-search-scan-button:hover {
-  color: var(--interactive-accent) !important;
+body .modal.book-search-input-modal.book-search-input-modal .book-search-scan-button.book-search-scan-button:hover,
+body .modal.book-search-global-modal.book-search-global-modal .book-search-scan-button.book-search-scan-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--icon-color-hover, var(--interactive-accent));
+  opacity: var(--icon-opacity-hover, 1);
 }
 
-.book-search-scan-button svg {
-  width: 20px !important;
-  height: 20px !important;
+body .modal.book-search-input-modal.book-search-input-modal .book-search-scan-button.book-search-scan-button svg,
+body .modal.book-search-global-modal.book-search-global-modal .book-search-scan-button.book-search-scan-button svg {
+  width: var(--icon-size);
+  height: var(--icon-size);
 }
 
-body.is-mobile .book-search-input-container {
-  width: 100% !important;
+body.is-mobile .modal.book-search-input-modal.book-search-input-modal .book-search-input-container.book-search-input-container,
+body.is-mobile .modal.book-search-global-modal.book-search-global-modal .book-search-input-container.book-search-input-container {
+  width: 100%;
 }
 
 /* Health Status Dots */

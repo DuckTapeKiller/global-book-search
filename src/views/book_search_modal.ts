@@ -126,7 +126,7 @@ export class BookSearchModal extends Modal {
       if (parentEl) {
         parentEl.addClass("book-search-input-container");
         const scanButton = parentEl.createEl("button", {
-          cls: "book-search-scan-button",
+          cls: "clickable-icon book-search-scan-button",
           attr: { title: "Scan barcode" },
         });
         setIcon(scanButton, "scan");
