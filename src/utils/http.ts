@@ -76,7 +76,28 @@ function cacheKey(
 
 function isRetryableStatus(status?: number): boolean {
   if (!status) return true;
-  return status === 429 || status >= 500;
+  return status === 202 || status === 429 || status >= 500;
+}
+
+// Markers of JavaScript bot challenges (AWS WAF on Goodreads, Cloudflare, …)
+// that some providers serve instead of the real page. Goodreads additionally
+// answers HTTP 202 with an empty body when it refuses a request outright.
+const BOT_CHALLENGE_MARKERS = [
+  "awswaf",
+  "gokuprops",
+  "challenge-container",
+  "cf-chl",
+  "cf-browser-verification",
+];
+
+export function looksLikeBotChallenge(
+  status?: number,
+  bodyText?: string,
+): boolean {
+  if (status === 202) return true;
+  const head = (bodyText || "").slice(0, 5000).toLowerCase();
+  if (!head) return false;
+  return BOT_CHALLENGE_MARKERS.some((marker) => head.includes(marker));
 }
 
 function getContentType(headers: Record<string, string>): string {
@@ -198,7 +219,17 @@ export async function httpRequest(
         }
       }
 
-      if (res.status >= 200 && res.status < 400) {
+      const blocked =
+        responseType !== "arrayBuffer" &&
+        looksLikeBotChallenge(res.status, normalizedText);
+
+      if (blocked) {
+        recordProviderFailure(
+          providerId,
+          new Error(`Bot challenge response (HTTP ${res.status})`),
+          res.status,
+        );
+      } else if (res.status >= 200 && res.status < 400) {
         recordProviderSuccess(providerId);
       } else {
         recordProviderFailure(
@@ -208,8 +239,15 @@ export async function httpRequest(
         );
       }
 
-      // Cache successful responses only.
-      if (useCache && key && res.status >= 200 && res.status < 400) {
+      // Cache successful responses only. Never cache bot-challenge pages:
+      // a cached challenge would mask recovery for the whole TTL.
+      if (
+        useCache &&
+        key &&
+        !blocked &&
+        res.status >= 200 &&
+        res.status < 400
+      ) {
         const ttl = Math.max(0, options.cacheTtlMs ?? httpConfig.cacheTtlMs);
         responseCache.set(key, {
           expiresAt: now() + ttl,
@@ -222,8 +260,8 @@ export async function httpRequest(
         });
       }
 
-      // Retry on rate-limit / server errors.
-      if (attempt < retries && isRetryableStatus(res.status)) {
+      // Retry on rate-limit / server errors / bot challenges.
+      if (attempt < retries && (blocked || isRetryableStatus(res.status))) {
         const delay = httpConfig.retryBaseDelayMs * Math.pow(2, attempt);
         if (httpConfig.diagnosticsEnabled) {
           console.debug(

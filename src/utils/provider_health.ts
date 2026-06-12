@@ -27,12 +27,16 @@ function classify(
 
   // Best-effort heuristics; we intentionally keep this simple and robust.
   if (status === 401 || status === 403) return "blocked";
+  // Goodreads (AWS WAF) answers 202 with an empty body when it blocks a request.
+  if (status === 202) return "blocked";
   if (status === 429) return "flaky";
   if (status && status >= 500) return "down";
 
   if (
     msg.includes("cloudflare") ||
     msg.includes("captcha") ||
+    msg.includes("bot challenge") ||
+    msg.includes("awswaf") ||
     msg.includes("access denied")
   ) {
     return "blocked";

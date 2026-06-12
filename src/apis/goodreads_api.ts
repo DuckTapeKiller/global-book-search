@@ -1,9 +1,35 @@
+import { Notice } from "obsidian";
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
-import { getHttpConfig, httpRequest } from "@utils/http";
+import { getHttpConfig, httpRequest, looksLikeBotChallenge } from "@utils/http";
+
+/**
+ * Merge detail-page data into the search-result book without ever letting an
+ * empty scrape erase fields the search result already had (title, author,
+ * cover, …). Goodreads serves bot-challenge pages that parse to all-blank
+ * books; clobbering with those produced empty notes.
+ */
+export function mergeBookData(base: Book, extracted: Book): Book {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(extracted)) {
+    const isEmpty =
+      value === undefined ||
+      value === null ||
+      (typeof value === "string" && !value.trim()) ||
+      (Array.isArray(value) &&
+        value.filter((v) => String(v).trim()).length === 0);
+    if (!isEmpty) {
+      merged[key] = value;
+    }
+  }
+  return merged as unknown as Book;
+}
 
 export class GoodreadsApi implements BaseBooksApiImpl {
-  static readonly SCRAPER_VERSION = "2026-05-13";
+  static readonly SCRAPER_VERSION = "2026-06-12";
+
+  // Notify at most once per session; bulk imports would otherwise spam it.
+  private static didWarnDetailBlocked = false;
 
   private readonly userAgent =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
@@ -23,6 +49,20 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     return (url || "")
       .replace(/_SY\d+_/, "_SY475_")
       .replace(/_SX\d+_/, "_SX475_");
+  }
+
+  private stripHtml(html: string): string {
+    return (html || "")
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
@@ -218,6 +258,19 @@ export class GoodreadsApi implements BaseBooksApiImpl {
 
   async getByQuery(query: string): Promise<Book[]> {
     try {
+      // The autocomplete JSON endpoint is the only one Goodreads currently
+      // serves without an AWS WAF bot challenge, so try it before touching
+      // the HTML search page at all.
+      const autocompleteBooks = await this.getByAutocomplete(query);
+      if (autocompleteBooks.length > 0) {
+        if (getHttpConfig().diagnosticsEnabled) {
+          console.debug(
+            `[goodreads] strategy=autocompleteJson results=${autocompleteBooks.length}`,
+          );
+        }
+        return autocompleteBooks;
+      }
+
       // Use the explicit books search to reduce layout variance.
       const encodedQuery = encodeURIComponent(query);
       const searchUrl = `https://www.goodreads.com/search?utf8=%E2%9C%93&search_type=books&q=${encodedQuery}&query=${encodedQuery}`;
@@ -237,7 +290,6 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         id: string;
         run: () => Promise<Book[]> | Book[];
       }> = [
-        { id: "autocompleteJson", run: () => this.getByAutocomplete(query) },
         {
           id: "direct-book-page",
           run: () => this.tryParseDirectBookPage(doc, searchUrl),
@@ -471,6 +523,11 @@ export class GoodreadsApi implements BaseBooksApiImpl {
               "",
           ) || "";
 
+        const descriptionHtml =
+          this.asString(this.getPath(obj, ["description", "html"])) ||
+          this.asString(obj.description);
+        const description = this.stripHtml(descriptionHtml).replace(/"/g, "'");
+
         books.push({
           title,
           author: authorName,
@@ -479,7 +536,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
           previewLink: link,
           coverUrl: this.normalizeCoverUrl(coverUrl),
           coverSmallUrl: coverUrl,
-          description: "",
+          description,
           publisher: "",
           publishDate: "",
           totalPage: obj.numPages ? String(obj.numPages) : "",
@@ -518,11 +575,38 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         { providerId: "goodreads", purpose: "book" },
       );
 
+      if (looksLikeBotChallenge(bookRes.status, bookRes.text)) {
+        this.warnDetailPageBlocked(bookRes.status);
+        return book;
+      }
+
       const doc = this.parseHtml(bookRes.text);
-      return this.extractBook(doc, book.link);
+      const extracted = this.extractBook(doc, book.link);
+
+      if (!extracted.title.trim()) {
+        // Page came back but in a shape we can't parse (challenge variant or
+        // layout change) — keep the search-result data instead of blanks.
+        this.warnDetailPageBlocked(bookRes.status);
+        return book;
+      }
+
+      return mergeBookData(book, extracted);
     } catch (error) {
       console.warn("Goodreads getBook error", error);
       return book;
+    }
+  }
+
+  private warnDetailPageBlocked(status?: number): void {
+    console.warn(
+      `Goodreads: book page blocked or unparseable (HTTP ${status ?? "?"}, scraper ${GoodreadsApi.SCRAPER_VERSION}); falling back to search-result data.`,
+    );
+    if (!GoodreadsApi.didWarnDetailBlocked) {
+      GoodreadsApi.didWarnDetailBlocked = true;
+      new Notice(
+        "Goodreads is blocking detailed metadata requests (bot protection). Notes will be created with basic search data only — publisher, ISBN and genres may be missing.",
+        10_000,
+      );
     }
   }
 
