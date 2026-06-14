@@ -25,11 +25,215 @@ export function mergeBookData(base: Book, extracted: Book): Book {
   return merged as unknown as Book;
 }
 
+const GOODREADS_HOST = "https://www.goodreads.com";
+
+// Locale-prefixed paths (`/es/book/show/<id>`) currently dodge the AWS WAF rule
+// that blocks the canonical path. Kept short on purpose: the sticky-last-good
+// tracker means we normally only hit one route, and we only fan out when a tier
+// breaks. Add more here if Goodreads ever blocks these.
+const GOODREADS_LOCALES = ["en", "es", "de"];
+
+export interface GoodreadsRoute {
+  kind: string;
+  url: string;
+}
+
+/**
+ * Tier 1 of the escalation chain: every direct Goodreads detail-page route we
+ * know dodges (or is) the canonical path, in priority order. Each yields the
+ * exact same Next.js page, so one parser handles all of them. The variety is
+ * the point — for the WAF to kill this tier it would have to block `.xml` *and*
+ * every localized path, which would also break Goodreads' own i18n site.
+ */
+export function buildGoodreadsDetailRoutes(
+  id: string,
+  slug: string,
+  canonicalUrl: string,
+): GoodreadsRoute[] {
+  const routes: GoodreadsRoute[] = [];
+  if (id) {
+    routes.push({ kind: "xml", url: `${GOODREADS_HOST}/book/show/${id}.xml` });
+    if (slug) {
+      routes.push({
+        kind: "xml-slug",
+        url: `${GOODREADS_HOST}/book/show/${id}.${slug}.xml`,
+      });
+    }
+    for (const loc of GOODREADS_LOCALES) {
+      routes.push({
+        kind: `locale-${loc}`,
+        url: `${GOODREADS_HOST}/${loc}/book/show/${id}`,
+      });
+    }
+  }
+  if (canonicalUrl) routes.push({ kind: "canonical", url: canonicalUrl });
+  return routes;
+}
+
+/** Move the last route that worked to the front so we usually fetch once. */
+export function orderRoutesBySticky(
+  routes: GoodreadsRoute[],
+  stickyKind: string | null,
+): GoodreadsRoute[] {
+  if (!stickyKind) return routes;
+  const preferred = routes.filter((r) => r.kind === stickyKind);
+  const rest = routes.filter((r) => r.kind !== stickyKind);
+  return [...preferred, ...rest];
+}
+
+/**
+ * Rewrite a Wayback snapshot URL to its raw form (`/web/<ts>id_/…`) so
+ * archive.org returns the original page without its toolbar/link rewriting.
+ */
+export function waybackRawUrl(snapshotUrl: string): string {
+  return (snapshotUrl || "")
+    .replace(/^http:/i, "https:")
+    .replace(/\/web\/(\d+)\//, "/web/$1id_/");
+}
+
+function decodeHtmlEntities(value: string): string {
+  return (value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function digitsOnly(value: unknown): string {
+  return String(value ?? "").replace(/[^0-9X]/gi, "");
+}
+
+/**
+ * Tier 4 parser layer: schema.org `Book` JSON-LD. Structure-independent, so it
+ * survives a Goodreads frontend rewrite that would break the apolloState parse.
+ * Pure (regex, no DOM) so it runs in the escalation path and is unit-testable.
+ */
+export function parseLdJsonBook(html: string): Partial<Book> {
+  const out: Partial<Book> = {};
+  const blocks =
+    (html || "").match(
+      /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+    ) || [];
+
+  for (const block of blocks) {
+    const jsonText = block
+      .replace(/^<script[^>]*>/i, "")
+      .replace(/<\/script>\s*$/i, "");
+    let data: unknown;
+    try {
+      data = JSON.parse(jsonText);
+    } catch {
+      continue;
+    }
+
+    const items = Array.isArray(data) ? data : [data];
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const type = rec["@type"];
+      const isBook =
+        type === "Book" || (Array.isArray(type) && type.includes("Book"));
+      if (!isBook) continue;
+
+      if (!out.title && typeof rec.name === "string") {
+        out.title = decodeHtmlEntities(rec.name);
+      }
+      const isbn = digitsOnly(rec.isbn);
+      if (isbn.length === 13 && !out.isbn13) out.isbn13 = isbn;
+      if (isbn.length === 10 && !out.isbn10) out.isbn10 = isbn;
+      if (!out.totalPage && rec.numberOfPages != null) {
+        out.totalPage = String(rec.numberOfPages);
+      }
+      if (!out.publisher) {
+        const pub = rec.publisher;
+        const name =
+          pub && typeof pub === "object"
+            ? (pub as Record<string, unknown>).name
+            : pub;
+        if (typeof name === "string") out.publisher = decodeHtmlEntities(name);
+      }
+      if (!out.coverUrl) {
+        const img = Array.isArray(rec.image) ? rec.image[0] : rec.image;
+        if (typeof img === "string") out.coverUrl = img;
+      }
+      if (!out.description && typeof rec.description === "string") {
+        out.description = decodeHtmlEntities(rec.description);
+      }
+      if (!out.categories && rec.genre != null) {
+        const genre = Array.isArray(rec.genre)
+          ? rec.genre.join(", ")
+          : String(rec.genre);
+        if (genre.trim()) {
+          out.categories = genre;
+          out.category = genre;
+        }
+      }
+      const authors: string[] = [];
+      const rawAuthors = Array.isArray(rec.author) ? rec.author : [rec.author];
+      for (const a of rawAuthors) {
+        if (typeof a === "string") authors.push(a);
+        else if (a && typeof a === "object") {
+          const name = (a as Record<string, unknown>).name;
+          if (typeof name === "string") authors.push(name);
+        }
+      }
+      const cleanAuthors = authors.map((a) => a.trim()).filter(Boolean);
+      if (cleanAuthors.length && !out.authors) {
+        out.authors = cleanAuthors;
+        if (!out.author) out.author = cleanAuthors[0];
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Tier 4 parser layer (last ditch): OpenGraph/Twitter meta tags. Only title,
+ * cover and description survive here, but that's enough to avoid a blank note.
+ */
+export function parseOgMetaBook(html: string): Partial<Book> {
+  const out: Partial<Book> = {};
+  const read = (prop: string): string => {
+    const p = prop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Try both attribute orders (property-then-content and content-then-property).
+    const re1 = new RegExp(
+      `<meta[^>]+(?:property|name)=["']${p}["'][^>]+content=["']([^"']*)["']`,
+      "i",
+    );
+    const re2 = new RegExp(
+      `<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${p}["']`,
+      "i",
+    );
+    const m = (html || "").match(re1) || (html || "").match(re2);
+    return m ? decodeHtmlEntities(m[1]) : "";
+  };
+
+  const title = read("og:title") || read("twitter:title");
+  if (title) out.title = title.replace(/\s*\|\s*Goodreads\s*$/i, "").trim();
+  const image = read("og:image");
+  if (image) out.coverUrl = image;
+  const description = read("og:description");
+  if (description) out.description = description;
+  return out;
+}
+
+// Remembers which Tier-1 route last worked, across GoodreadsApi instances
+// (the factory creates a fresh instance per call). Avoids re-probing blocked
+// routes on every fetch.
+let stickyRouteKind: string | null = null;
+
 export class GoodreadsApi implements BaseBooksApiImpl {
-  static readonly SCRAPER_VERSION = "2026-06-12";
+  static readonly SCRAPER_VERSION = "2026-06-14";
 
   // Notify at most once per session; bulk imports would otherwise spam it.
   private static didWarnDetailBlocked = false;
+
+  // Status of the last direct-route fetch, for the fallback diagnostic Notice.
+  private lastDetailStatus?: number;
 
   private readonly userAgent =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
@@ -562,38 +766,388 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     }
   }
 
+  private extractSlug(link: string): string {
+    const m = (link || "").match(/\/book\/show\/\d+[.-]([^/?#]+)/);
+    return (m?.[1] || "").replace(/\.xml$/i, "");
+  }
+
+  /**
+   * Fetch full book metadata using a tiered escalation chain. Each tier is an
+   * independent way to reach the data, so one breaking falls through to the
+   * next instead of producing a blank note:
+   *
+   *   Tier 1  Direct Goodreads routes (`.xml`, locale prefixes, canonical)
+   *   Tier 2  ISBN→id resolver (`isbn_to_id`) when the link carries no id
+   *   Tier 3  Independent archives (Wayback Machine, archive.today)
+   *   Tier 4  Layered parsing (apolloState → JSON-LD → OpenGraph) per fetch
+   *   Tier 5  Cross-source top-up (Google Books, Open Library)
+   *   Tier 6  Search-result data only (never blank)
+   */
   async getBook(book: Book): Promise<Book> {
-    try {
-      const bookRes = await httpRequest(
+    const canonicalLink = book.link || "";
+    this.lastDetailStatus = undefined;
+
+    // Tiers 1–4: get a parsed detail page from Goodreads or an archive.
+    const detail = await this.fetchDetail(book);
+    let result = detail ? mergeBookData(book, detail) : { ...book };
+
+    // Tier 5: top up still-missing core fields from independent sources. Only
+    // fires when a tier above couldn't supply them, so successful Goodreads
+    // fetches don't pay for redundant network calls.
+    const missingCore =
+      !result.publisher ||
+      (!result.isbn13 && !result.isbn10) ||
+      !result.categories;
+    if (missingCore) {
+      try {
+        const cross = await this.fetchCrossSource(result);
+        if (cross) {
+          // result (Goodreads) wins where present; cross-source fills the gaps.
+          result = mergeBookData(cross as Book, result);
+        }
+      } catch (error) {
+        console.warn("Goodreads cross-source enrichment failed", error);
+      }
+    }
+
+    // Always present the canonical reader-facing link, not an .xml/archive URL.
+    if (canonicalLink) {
+      result.link = canonicalLink;
+      result.previewLink = canonicalLink;
+    }
+
+    // Tier 6: if nothing beyond the search result could be recovered, say so.
+    const recoveredDetail =
+      !!result.publisher ||
+      !!result.isbn13 ||
+      !!result.isbn10 ||
+      !!result.categories;
+    if (!recoveredDetail) {
+      this.warnDetailPageBlocked(this.lastDetailStatus);
+    }
+
+    return result;
+  }
+
+  /** Tiers 1–4: a parsed Book from a direct route or archive, or null. */
+  private async fetchDetail(book: Book): Promise<Book | null> {
+    let id = this.extractGoodreadsLegacyId(book.link);
+
+    // Tier 2: recover the Goodreads id from an ISBN when the link has none.
+    if (!id) {
+      const isbn = book.isbn13 || book.isbn10 || "";
+      if (isbn) id = await this.resolveIsbnToId(isbn);
+    }
+
+    const slug = this.extractSlug(book.link);
+    const canonical =
+      book.link || (id ? `${GOODREADS_HOST}/book/show/${id}` : "");
+
+    // Tier 1: direct routes, sticky-last-good first so we usually fetch once.
+    const routes = orderRoutesBySticky(
+      buildGoodreadsDetailRoutes(id, slug, canonical),
+      stickyRouteKind,
+    );
+    for (const route of routes) {
+      const parsed = await this.tryFetchAndParse(route.url, canonical);
+      if (parsed) {
+        stickyRouteKind = route.kind;
+        if (getHttpConfig().diagnosticsEnabled) {
+          console.debug(`[goodreads] detail via route=${route.kind}`);
+        }
+        return parsed;
+      }
+    }
+
+    // Tier 3: independent archives (a different host the WAF can't touch).
+    if (canonical) {
+      const archives: Array<{
+        id: string;
+        run: () => Promise<{ html: string } | null>;
+      }> = [
+        { id: "wayback", run: () => this.fetchViaWayback(canonical) },
         {
-          url: book.link,
-          method: "GET",
-          headers: {
-            "User-Agent": this.userAgent,
-          },
+          id: "archive.today",
+          run: () => this.fetchViaArchiveToday(canonical),
         },
+      ];
+      for (const archive of archives) {
+        try {
+          const snap = await archive.run();
+          if (!snap) continue;
+          const parsed = this.parseDetailHtml(snap.html, canonical);
+          if (parsed.title.trim()) {
+            if (getHttpConfig().diagnosticsEnabled) {
+              console.debug(`[goodreads] detail via archive=${archive.id}`);
+            }
+            return parsed;
+          }
+        } catch (error) {
+          console.warn(`Goodreads archive ${archive.id} failed`, error);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private async tryFetchAndParse(
+    url: string,
+    canonicalLink: string,
+  ): Promise<Book | null> {
+    try {
+      const res = await httpRequest(
+        { url, method: "GET", headers: { "User-Agent": this.userAgent } },
         { providerId: "goodreads", purpose: "book" },
       );
+      this.lastDetailStatus = res.status;
+      if (looksLikeBotChallenge(res.status, res.text)) return null;
 
-      if (looksLikeBotChallenge(bookRes.status, bookRes.text)) {
-        this.warnDetailPageBlocked(bookRes.status);
-        return book;
-      }
-
-      const doc = this.parseHtml(bookRes.text);
-      const extracted = this.extractBook(doc, book.link);
-
-      if (!extracted.title.trim()) {
-        // Page came back but in a shape we can't parse (challenge variant or
-        // layout change) — keep the search-result data instead of blanks.
-        this.warnDetailPageBlocked(bookRes.status);
-        return book;
-      }
-
-      return mergeBookData(book, extracted);
+      const parsed = this.parseDetailHtml(res.text, canonicalLink || url);
+      return parsed.title.trim() ? parsed : null;
     } catch (error) {
-      console.warn("Goodreads getBook error", error);
-      return book;
+      console.warn("Goodreads route failed", { url, error });
+      return null;
+    }
+  }
+
+  /** Tier 4: layered parse — apolloState/DOM, then JSON-LD, then OpenGraph. */
+  private parseDetailHtml(html: string, link: string): Book {
+    const doc = this.parseHtml(html);
+    let parsed = this.extractBook(doc, link);
+    // Structure-independent layers fill any gaps the primary parse left.
+    parsed = mergeBookData(parseLdJsonBook(html) as Book, parsed);
+    parsed = mergeBookData(parseOgMetaBook(html) as Book, parsed);
+    return parsed;
+  }
+
+  /**
+   * Tier 2: resolve a Goodreads numeric id from an ISBN via `isbn_to_id`,
+   * which 301-redirects to the canonical book URL. Best-effort: depends on the
+   * HTTP layer exposing the redirect Location (some clients auto-follow).
+   */
+  private async resolveIsbnToId(isbn: string): Promise<string> {
+    const clean = digitsOnly(isbn);
+    if (!clean) return "";
+    try {
+      const res = await httpRequest(
+        {
+          url: `${GOODREADS_HOST}/book/isbn_to_id/${clean}`,
+          method: "GET",
+          headers: { "User-Agent": this.userAgent },
+        },
+        { providerId: "goodreads", purpose: "isbn_to_id", cacheTtlMs: 600_000 },
+      );
+      const headers = (res.headers || {}) as Record<string, string>;
+      const location = headers["location"] || headers["Location"] || "";
+      // Pull the id from the redirect target, or from the body if one wasn't
+      // exposed (a numeric id is sometimes returned as plain text).
+      return (
+        this.extractGoodreadsLegacyId(location) ||
+        (/^\d+$/.test((res.text || "").trim()) ? (res.text || "").trim() : "")
+      );
+    } catch (error) {
+      console.warn("Goodreads isbn_to_id failed", error);
+      return "";
+    }
+  }
+
+  /** Tier 3a: latest Wayback Machine snapshot of the canonical page. */
+  private async fetchViaWayback(
+    canonicalUrl: string,
+  ): Promise<{ html: string } | null> {
+    try {
+      const availRes = await httpRequest(
+        {
+          url: `https://archive.org/wayback/available?url=${encodeURIComponent(canonicalUrl)}`,
+          method: "GET",
+        },
+        {
+          providerId: "goodreads-archive",
+          purpose: "wayback-available",
+          responseType: "json",
+          cacheTtlMs: 600_000,
+        },
+      );
+      const snapUrl = this.asString(
+        this.getPath(availRes.json, ["archived_snapshots", "closest", "url"]),
+      );
+      if (!snapUrl) return null;
+
+      const snapRes = await httpRequest(
+        {
+          url: waybackRawUrl(snapUrl),
+          method: "GET",
+          headers: { "User-Agent": this.userAgent },
+        },
+        { providerId: "goodreads-archive", purpose: "wayback-snapshot" },
+      );
+      if (snapRes.status >= 400 || !snapRes.text) return null;
+      return { html: snapRes.text };
+    } catch (error) {
+      console.warn("Goodreads Wayback fetch failed", error);
+      return null;
+    }
+  }
+
+  /** Tier 3b: archive.today snapshot — a second, independent archive operator. */
+  private async fetchViaArchiveToday(
+    canonicalUrl: string,
+  ): Promise<{ html: string } | null> {
+    try {
+      const res = await httpRequest(
+        {
+          url: `https://archive.ph/newest/${canonicalUrl}`,
+          method: "GET",
+          headers: { "User-Agent": this.userAgent },
+        },
+        { providerId: "goodreads-archive", purpose: "archive-today" },
+      );
+      if (res.status >= 400 || !res.text) return null;
+      // Only accept a snapshot that actually carries parseable book data.
+      if (!/__NEXT_DATA__|application\/ld\+json/i.test(res.text)) return null;
+      return { html: res.text };
+    } catch (error) {
+      console.warn("Goodreads archive.today fetch failed", error);
+      return null;
+    }
+  }
+
+  /** Tier 5: fill missing fields from sources that don't block scraping. */
+  private async fetchCrossSource(book: Book): Promise<Partial<Book> | null> {
+    const title = (book.title || "").trim();
+    if (!title) return null;
+    const author = (book.author || book.authors?.[0] || "").trim();
+    const isbn = book.isbn13 || book.isbn10 || "";
+
+    const google = await this.fetchGoogleBooks(
+      isbn ? `isbn:${isbn}` : `${title} ${author}`.trim(),
+    );
+    if (google && (google.publisher || google.isbn13 || google.categories)) {
+      return google;
+    }
+
+    const openLibrary = await this.fetchOpenLibrary(title, author);
+    return openLibrary;
+  }
+
+  private async fetchGoogleBooks(query: string): Promise<Partial<Book> | null> {
+    try {
+      const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=5&printType=books`;
+      const res = await httpRequest(
+        { url, method: "GET", headers: { Accept: "application/json" } },
+        {
+          providerId: "google",
+          purpose: "goodreads-crosssource",
+          responseType: "json",
+          cacheTtlMs: 600_000,
+        },
+      );
+      const items = this.getPath(res.json, ["items"]);
+      if (!Array.isArray(items)) return null;
+
+      for (const item of items) {
+        const vi = this.getPath(item, ["volumeInfo"]);
+        if (!this.isRecord(vi)) continue;
+
+        let isbn13 = "";
+        let isbn10 = "";
+        const ids = vi["industryIdentifiers"];
+        if (Array.isArray(ids)) {
+          for (const idObj of ids) {
+            const type = this.asString(this.getPath(idObj, ["type"]));
+            const value = digitsOnly(this.getPath(idObj, ["identifier"]));
+            if (type === "ISBN_13" && value.length === 13) isbn13 = value;
+            if (type === "ISBN_10" && value.length === 10) isbn10 = value;
+          }
+        }
+        const cats = vi["categories"];
+        const categories = Array.isArray(cats) ? cats.join(", ") : "";
+        const pageCount = this.asNumber(vi["pageCount"]);
+
+        const out: Partial<Book> = {
+          publisher: this.asString(vi["publisher"]),
+          publishDate: this.asString(vi["publishedDate"]),
+          totalPage: pageCount ? String(pageCount) : "",
+          categories,
+          category: categories,
+          isbn13,
+          isbn10,
+          description: this.stripHtml(this.asString(vi["description"])),
+        };
+        if (out.publisher || out.isbn13 || out.categories || out.totalPage) {
+          return out;
+        }
+      }
+      return null;
+    } catch (error) {
+      console.warn("Goodreads cross-source (Google Books) failed", error);
+      return null;
+    }
+  }
+
+  private async fetchOpenLibrary(
+    title: string,
+    author: string,
+  ): Promise<Partial<Book> | null> {
+    try {
+      const url =
+        `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}` +
+        (author ? `&author=${encodeURIComponent(author)}` : "") +
+        "&limit=1&fields=isbn,publisher,number_of_pages_median,subject";
+      const res = await httpRequest(
+        { url, method: "GET", headers: { Accept: "application/json" } },
+        {
+          providerId: "openlibrary",
+          purpose: "goodreads-crosssource",
+          responseType: "json",
+          cacheTtlMs: 600_000,
+        },
+      );
+      const docs = this.getPath(res.json, ["docs"]);
+      if (!Array.isArray(docs) || docs.length === 0) return null;
+      const doc = docs[0];
+
+      let isbn13 = "";
+      let isbn10 = "";
+      const isbns = this.getPath(doc, ["isbn"]);
+      if (Array.isArray(isbns)) {
+        for (const raw of isbns) {
+          const value = digitsOnly(raw);
+          if (value.length === 13 && !isbn13) isbn13 = value;
+          if (value.length === 10 && !isbn10) isbn10 = value;
+        }
+      }
+      const publishers = this.getPath(doc, ["publisher"]);
+      const subjects = this.getPath(doc, ["subject"]);
+      const pages = this.asNumber(
+        this.getPath(doc, ["number_of_pages_median"]),
+      );
+      const categories = Array.isArray(subjects)
+        ? subjects
+            .slice(0, 4)
+            .map((s) => this.asString(s))
+            .filter(Boolean)
+            .join(", ")
+        : "";
+
+      const out: Partial<Book> = {
+        publisher: Array.isArray(publishers)
+          ? this.asString(publishers[0])
+          : "",
+        totalPage: pages ? String(pages) : "",
+        categories,
+        category: categories,
+        isbn13,
+        isbn10,
+      };
+      if (out.publisher || out.categories || out.isbn13 || out.totalPage) {
+        return out;
+      }
+      return null;
+    } catch (error) {
+      console.warn("Goodreads cross-source (Open Library) failed", error);
+      return null;
     }
   }
 
