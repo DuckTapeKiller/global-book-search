@@ -4,6 +4,7 @@ import { Book } from "@models/book.model";
 export class BookSuggestModal extends SuggestModal<Book> {
   showCoverImageInSearch: boolean;
   private isSelected = false;
+  private cancelTimer: number | null = null;
 
   constructor(
     app: App,
@@ -67,14 +68,25 @@ export class BookSuggestModal extends SuggestModal<Book> {
   // Perform action on the selected suggestion.
   onChooseSuggestion(book: Book) {
     this.isSelected = true;
+    // A selection landed — cancel any pending "close means cancel" timer that
+    // onClose may have scheduled just before this fired (iOS tap ordering).
+    if (this.cancelTimer !== null) {
+      window.clearTimeout(this.cancelTimer);
+      this.cancelTimer = null;
+    }
     this.onChoose(null, book);
   }
 
   onClose(): void {
-    // Only enforce explicit cancellation on Mobile to fix the shadow issue.
-    // On Desktop, this causes a race condition where valid selections are ignored.
-    if (Platform.isMobile && !this.isSelected) {
-      this.onChoose(new Error("Cancelled request"));
-    }
+    // Only enforce explicit cancellation on Mobile (Desktop handles it via
+    // onChooseSuggestion, and cancelling there races with valid selections).
+    if (!Platform.isMobile || this.isSelected) return;
+    // On iOS, tapping a result can fire onClose just *before* onChooseSuggestion.
+    // Defer the cancellation so a selection arriving moments later wins the race
+    // instead of being lost to "Cancelled request".
+    this.cancelTimer = window.setTimeout(() => {
+      this.cancelTimer = null;
+      if (!this.isSelected) this.onChoose(new Error("Cancelled request"));
+    }, 300);
   }
 }

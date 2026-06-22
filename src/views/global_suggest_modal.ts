@@ -3,6 +3,7 @@ import { BookWithSource } from "@apis/global_search";
 
 export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
   private isSelected = false;
+  private cancelTimer: number | null = null;
 
   constructor(
     app: App,
@@ -83,12 +84,23 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
 
   onChooseSuggestion(book: BookWithSource) {
     this.isSelected = true;
+    // A selection landed — cancel any pending "close means cancel" timer that
+    // onClose may have scheduled just before this fired (iOS tap ordering).
+    if (this.cancelTimer !== null) {
+      window.clearTimeout(this.cancelTimer);
+      this.cancelTimer = null;
+    }
     this.onChoose(null, book);
   }
 
   onClose() {
-    if (Platform.isMobile && !this.isSelected) {
-      this.onChoose(new Error("Cancelled request"));
-    }
+    if (!Platform.isMobile || this.isSelected) return;
+    // On iOS, tapping a result can fire onClose just *before* onChooseSuggestion.
+    // Defer the cancellation so a selection arriving moments later wins the race
+    // instead of being lost to "Cancelled request".
+    this.cancelTimer = window.setTimeout(() => {
+      this.cancelTimer = null;
+      if (!this.isSelected) this.onChoose(new Error("Cancelled request"));
+    }, 300);
   }
 }
