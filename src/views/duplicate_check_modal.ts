@@ -1,4 +1,4 @@
-import { App, Modal, Setting, TFile } from "obsidian";
+import { App, Modal, TFile } from "obsidian";
 
 export enum DuplicateAction {
   OPEN_EXISTING = "open",

@@ -312,7 +312,9 @@ export async function httpRequest(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(typeof lastError === "string" ? lastError : "Request failed");
 }
 
 export function clearHttpCache(): void {

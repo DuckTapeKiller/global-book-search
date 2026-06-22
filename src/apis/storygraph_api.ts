@@ -1,6 +1,7 @@
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
 import { getHttpConfig, httpRequest } from "@utils/http";
+import { getArray, getProp, getString, isRecord } from "@utils/json";
 
 export class StoryGraphApi implements BaseBooksApiImpl {
   static readonly SCRAPER_VERSION = "2026-05-13";
@@ -242,16 +243,18 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       );
       for (const match of jsonLdMatches) {
         try {
-          const data = JSON.parse(match[1]);
-          const entries = Array.isArray(data) ? data : [data];
+          const data: unknown = JSON.parse(match[1]);
+          const entries = Array.isArray(data) ? (data as unknown[]) : [data];
           for (const entry of entries) {
+            const rec = isRecord(entry) ? entry : {};
+            const graphFirst = getArray(rec["@graph"])[0];
             const rawIsbn =
-              entry?.isbn ||
-              entry?.isbn13 ||
-              entry?.isbn10 ||
-              entry?.["@graph"]?.[0]?.isbn;
+              getString(rec.isbn) ||
+              getString(rec.isbn13) ||
+              getString(rec.isbn10) ||
+              getString(getProp(graphFirst, "isbn"));
             if (rawIsbn) {
-              const digits = String(rawIsbn).replace(/[^0-9X]/gi, "");
+              const digits = rawIsbn.replace(/[^0-9X]/gi, "");
               if (digits.length === 13) isbn13 = digits;
               else if (digits.length === 10) isbn10 = digits;
             }
@@ -439,6 +442,6 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       isbn10,
       isbn13,
       translator,
-    } as Book;
+    };
   }
 }

@@ -34,6 +34,8 @@ import {
 } from "@apis/global_search";
 import { VaultIndexEntry, BookEdition } from "@models/accuracy.model";
 import { configureHttp } from "@utils/http";
+import { asRecord } from "@utils/json";
+import { loadHistory, serializeHistory } from "@utils/provider_history";
 
 export default class BookSearchPlugin extends Plugin {
   settings: BookSearchPluginSettings;
@@ -46,13 +48,17 @@ export default class BookSearchPlugin extends Plugin {
     for (const file of files) {
       const cache = this.app.metadataCache.getFileCache(file);
       if (cache?.frontmatter) {
-        const isbn13 = cache.frontmatter.isbn13;
-        const isbn10 = cache.frontmatter.isbn10;
+        const frontmatter = asRecord(cache.frontmatter);
+        // Frontmatter ISBNs may be stored as quoted strings or YAML numbers.
+        const toIsbn = (v: unknown): string =>
+          typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+        const isbn13 = toIsbn(frontmatter.isbn13);
+        const isbn10 = toIsbn(frontmatter.isbn10);
         if (isbn13 || isbn10) {
           index.push({
             path: file.path,
-            isbn13: String(isbn13 || ""),
-            isbn10: String(isbn10 || ""),
+            isbn13,
+            isbn10,
           });
         }
       }
@@ -64,6 +70,13 @@ export default class BookSearchPlugin extends Plugin {
     await this.loadSettings();
     this.applyRuntimeHttpConfig();
     this.noteCreator = new BookNoteCreator(this.app, this.settings);
+
+    // Rehydrate the rolling provider-performance history and flush it to disk
+    // periodically (it's updated in-memory on every request).
+    loadHistory(this.settings.providerHistory);
+    this.registerInterval(
+      window.setInterval(() => this.flushProviderHistory(), 120_000),
+    );
 
     // This creates an icon in the left ribbon.
     const ribbonIconEl = this.addRibbonIcon(
@@ -635,13 +648,27 @@ export default class BookSearchPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = (await this.loadData()) as
+      | Partial<BookSearchPluginSettings>
+      | null
+      | undefined;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
     this.applyRuntimeHttpConfig();
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
     this.applyRuntimeHttpConfig();
+  }
+
+  /** Persist the in-memory provider-performance history to the data file. */
+  flushProviderHistory(): void {
+    this.settings.providerHistory = serializeHistory();
+    void this.saveData(this.settings);
+  }
+
+  onunload() {
+    this.flushProviderHistory();
   }
 
   private applyRuntimeHttpConfig(): void {
@@ -666,7 +693,7 @@ export default class BookSearchPlugin extends Plugin {
         (resolve, reject) => {
           new GlobalSearchModal(this, "", (error, results) => {
             if (error) reject(error);
-            else resolve(results!);
+            else resolve(results);
           }).open();
         },
       );
@@ -680,7 +707,7 @@ export default class BookSearchPlugin extends Plugin {
             searchedBooks,
             (error, book) => {
               if (error) reject(error);
-              else resolve(book!);
+              else resolve(book);
             },
           ).open();
         },
@@ -693,7 +720,7 @@ export default class BookSearchPlugin extends Plugin {
           new EditionPickerModal(
             this.app,
             selectedBook.title,
-            selectedBook._editions!,
+            selectedBook._editions,
             (edition) => resolve(edition),
           ).open();
         });
@@ -872,7 +899,7 @@ export default class BookSearchPlugin extends Plugin {
     }
   }
 
-  selectServiceAndSearch(event?: MouseEvent) {
+  selectServiceAndSearch(_event?: MouseEvent) {
     new ServiceSelectionModal(this).open();
   }
 }

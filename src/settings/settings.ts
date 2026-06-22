@@ -1,7 +1,7 @@
 import { replaceDateInString } from "@utils/utils";
 import { App, Menu, Notice, PluginSettingTab, Setting } from "obsidian";
 
-import { ServiceProvider } from "@src/constants";
+import { GLOBAL_SEARCH_SOURCE_LABELS, ServiceProvider } from "@src/constants";
 import languages from "@utils/languages";
 import { SettingServiceProviderModal } from "@views/setting_service_provider_modal";
 import BookSearchPlugin from "../main";
@@ -10,9 +10,17 @@ import { FileSuggest } from "./suggesters/FileSuggester";
 import { FolderSuggest } from "./suggesters/FolderSuggester";
 import { clearHttpCache } from "@utils/http";
 import {
-  getAllProviderHealth,
+  getProviderHealth,
+  ProviderHealthStatus,
   resetProviderHealth,
 } from "@utils/provider_health";
+import {
+  clearHistory,
+  FAILURE_REASON_LABELS,
+  FAILURE_REASONS,
+  getTrackedProviderIds,
+  summarizeProvider,
+} from "@utils/provider_history";
 
 const docUrl = "https://github.com/DuckTapeKiller/global-book-search";
 
@@ -64,6 +72,10 @@ export interface BookSearchPluginSettings {
   // Cover behavior
   coverImageMode: "local" | "remote" | "none";
   coverImageFileExtension: "jpg" | "png" | "webp";
+
+  // Persisted rolling provider performance history (last few days). Opaque
+  // snapshot owned by @utils/provider_history; not user-editable.
+  providerHistory?: unknown;
 }
 
 export const FRONTMATTER_TEMPLATES = {
@@ -360,6 +372,44 @@ export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
   coverImageFileExtension: "jpg",
 };
 
+// ── Service-performance rendering helpers ──────────────────────────────────
+const STATUS_DOT_CLASS: Record<ProviderHealthStatus, string> = {
+  ok: "bsp-health-dot--ok",
+  flaky: "bsp-health-dot--warn",
+  blocked: "bsp-health-dot--error",
+  down: "bsp-health-dot--error",
+};
+
+/** Colour a day-dot by that day's success rate (null = no requests → grey). */
+function dotClassForRate(rate: number | null): string {
+  if (rate === null) return "bsp-health-dot--none";
+  if (rate >= 0.9) return "bsp-health-dot--ok";
+  if (rate >= 0.5) return "bsp-health-dot--warn";
+  return "bsp-health-dot--error";
+}
+
+function dayLabel(offsetFromToday: number): string {
+  if (offsetFromToday === 0) return "Today";
+  if (offsetFromToday === 1) return "Yesterday";
+  return `${offsetFromToday} days ago`;
+}
+
+function relTime(ms: number | undefined, nowMs: number): string {
+  if (!ms) return "never";
+  const diff = nowMs - ms;
+  if (diff < 60_000) return "just now";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function absTime(ms: number | undefined): string {
+  if (!ms) return "n/a";
+  return new Date(ms).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+}
+
 export class BookSearchSettingTab extends PluginSettingTab {
   private serviceProviderExtraSettingButton: HTMLElement | null = null;
   private preferredLocaleDropdownSetting: Setting | null = null;
@@ -381,7 +431,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
     return setting;
   }
 
-  private createFileLocationSetting(containerEl) {
+  private createFileLocationSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
       .setName("New file location")
       .setDesc("New book notes will be placed here.")
@@ -400,7 +450,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
       });
   }
 
-  private createFileNameFormatSetting(containerEl) {
+  private createFileNameFormatSetting(containerEl: HTMLElement) {
     const desc = activeDocument.createDocumentFragment();
     desc.createSpan({ text: "Enter the file name format. Example: " });
     const newFileNameHint = desc.createEl("code", {
@@ -650,7 +700,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
           `${languages[defaultLocale] || defaultLocale} (Default Locale)`,
         );
         Object.keys(languages).forEach((locale) => {
-          const localeName = languages[locale];
+          const localeName = (languages as Record<string, string>)[locale];
           if (localeName && locale !== defaultLocale)
             dropDown.addOption(locale, localeName);
         });
@@ -955,30 +1005,159 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createProviderHealthSummary(containerEl: HTMLElement) {
-    const items = getAllProviderHealth();
-    const summary =
-      items.length === 0
-        ? "No provider requests recorded in this session yet."
-        : items
-            .map((h) => {
-              const last =
-                h.lastErrorAt && h.lastErrorMessage
-                  ? ` — last error: ${h.lastErrorMessage}`
-                  : "";
-              return `${h.providerId}: ${h.status.toUpperCase()} (failures: ${h.consecutiveFailures})${last}`;
-            })
-            .join("\n");
+    const now = Date.now();
+    const services: Array<{ id: string; label: string }> = [
+      { id: "goodreads", label: "Goodreads" },
+      { id: "google", label: "Google Books" },
+      { id: "openlibrary", label: "OpenLibrary" },
+      { id: "storygraph", label: "StoryGraph" },
+      { id: "calibre", label: "Calibre" },
+    ];
 
     new Setting(containerEl)
-      .setName("Provider health")
-      .setDesc(summary)
+      .setName("Service performance (last 3 days)")
+      .setDesc(
+        "Reliability of each book source. Hover a dot for details; use “Copy report” when filing an issue.",
+      );
+
+    const wrap = containerEl.createDiv({ cls: "bsp-perf-wrap" });
+    for (const svc of services) {
+      this.renderServicePerformance(wrap, svc.label, svc.id, now);
+    }
+
+    new Setting(containerEl)
+      .addButton((btn) =>
+        btn
+          .setButtonText("Copy report")
+          .setCta()
+          .onClick(() => {
+            void navigator.clipboard
+              .writeText(this.buildDiagnosticsReport(now))
+              .then(
+                () => new Notice("Diagnostics report copied to clipboard"),
+                () => new Notice("Could not access the clipboard"),
+              );
+          }),
+      )
       .addButton((btn) =>
         btn.setButtonText("Reset").onClick(() => {
           resetProviderHealth();
-          new Notice("Provider health reset");
+          clearHistory();
+          this.plugin.flushProviderHistory();
+          new Notice("Provider history reset");
           this.display();
         }),
       );
+  }
+
+  private renderServicePerformance(
+    parent: HTMLElement,
+    label: string,
+    providerId: string,
+    now: number,
+  ): void {
+    const summary = summarizeProvider(providerId, now);
+    const status = getProviderHealth(providerId).status;
+
+    const box = parent.createDiv({ cls: "bsp-perf-service" });
+
+    const header = box.createDiv({ cls: "bsp-perf-header" });
+    header
+      .createSpan({ cls: `bsp-health-dot ${STATUS_DOT_CLASS[status]}` })
+      .setAttribute("title", `Current status: ${status}`);
+    header.createSpan({ text: label });
+
+    // Per-day dots (oldest → newest), coloured by that day's success rate.
+    const dayWrap = header.createSpan({ cls: "bsp-perf-days" });
+    summary.days.forEach((day, i) => {
+      const offset = summary.days.length - 1 - i;
+      const title =
+        day.total > 0
+          ? `${dayLabel(offset)}: ${Math.round((day.rate ?? 0) * 100)}% ok (${day.total} req, ${day.fail} fail)`
+          : `${dayLabel(offset)}: no requests`;
+      dayWrap
+        .createSpan({ cls: `bsp-health-dot ${dotClassForRate(day.rate)}` })
+        .setAttribute("title", title);
+    });
+
+    header.createSpan({
+      cls: "bsp-perf-rate",
+      text:
+        summary.total > 0
+          ? `${Math.round((summary.successRate ?? 0) * 100)}% · ${summary.total} req`
+          : "no requests",
+    });
+
+    const detail = box.createDiv({ cls: "bsp-perf-detail" });
+    if (summary.total === 0 && !summary.lastErrorAt) {
+      detail.createDiv({ text: "No requests recorded yet." });
+      return;
+    }
+
+    detail.createDiv({
+      text: `${summary.totalOk} ok · ${summary.totalFail} failed · last success ${relTime(summary.lastSuccessAt, now)}`,
+    });
+
+    const reasonParts = FAILURE_REASONS.filter(
+      (r) => summary.reasons[r] > 0,
+    ).map((r) => `${FAILURE_REASON_LABELS[r]}: ${summary.reasons[r]}`);
+    if (reasonParts.length > 0) {
+      detail.createDiv({ text: `Failures — ${reasonParts.join(" · ")}` });
+    }
+
+    if (summary.lastErrorAt && summary.lastErrorMessage) {
+      const code = summary.lastErrorCode
+        ? `HTTP ${summary.lastErrorCode} · `
+        : "";
+      detail.createDiv({
+        cls: "bsp-perf-error",
+        text: `Last error: ${code}${summary.lastErrorMessage} (${relTime(summary.lastErrorAt, now)})`,
+      });
+    }
+  }
+
+  private buildDiagnosticsReport(now: number): string {
+    const lines: string[] = [
+      `Global Book Search v${this.plugin.manifest.version} — provider performance (last 3 days)`,
+      `Generated: ${absTime(now)}`,
+      "",
+    ];
+    const ids = [
+      ...new Set([
+        "goodreads",
+        "google",
+        "openlibrary",
+        "storygraph",
+        "calibre",
+        ...getTrackedProviderIds(),
+      ]),
+    ];
+
+    for (const id of ids) {
+      const s = summarizeProvider(id, now);
+      const label = GLOBAL_SEARCH_SOURCE_LABELS[id] || id;
+      if (s.total === 0 && !s.lastErrorAt) {
+        lines.push(`${label}: no requests`);
+        continue;
+      }
+      const rate =
+        s.successRate !== null ? `${Math.round(s.successRate * 100)}%` : "n/a";
+      lines.push(`${label}: ${rate} ok · ${s.total} req · ${s.totalFail} fail`);
+
+      const reasonParts = FAILURE_REASONS.filter((r) => s.reasons[r] > 0).map(
+        (r) => `${FAILURE_REASON_LABELS[r]}: ${s.reasons[r]}`,
+      );
+      if (reasonParts.length > 0) lines.push(`  ${reasonParts.join(", ")}`);
+
+      if (s.lastErrorAt && s.lastErrorMessage) {
+        const code = s.lastErrorCode ? `HTTP ${s.lastErrorCode} ` : "";
+        lines.push(
+          `  last error: ${code}"${s.lastErrorMessage}" (${absTime(s.lastErrorAt)})`,
+        );
+      }
+      if (s.lastSuccessAt) lines.push(`  last ok: ${absTime(s.lastSuccessAt)}`);
+    }
+    return lines.join("\n");
   }
 
   private movePreferenceToFront(field: string, preferred: string): void {
@@ -1021,10 +1200,12 @@ export class BookSearchSettingTab extends PluginSettingTab {
           "Controls which provider wins when multiple values are available.",
         )
         .addDropdown((dropdown) => {
-          sources.forEach((s) => dropdown.addOption(s.id, s.label));
-          dropdown.setValue(currentTop).onChange(async (value) => {
+          sources.forEach((s) => {
+            dropdown.addOption(s.id, s.label);
+          });
+          dropdown.setValue(currentTop).onChange((value) => {
             this.movePreferenceToFront(field, value);
-            await this.plugin.saveSettings();
+            void this.plugin.saveSettings();
           });
         });
     });

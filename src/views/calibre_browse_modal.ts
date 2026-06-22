@@ -1,6 +1,7 @@
-import { App, Modal, Setting, setIcon, Notice } from "obsidian";
+import { App, Modal, setIcon } from "obsidian";
 import { Book } from "@models/book.model";
 import { CalibreApi } from "@apis/calibre_api";
+import { toErrorMessage } from "@utils/json";
 
 type BrowseMode = "tags" | "series" | "authors";
 
@@ -117,7 +118,7 @@ export class CalibreBrowseModal extends Modal {
       this.contentArea.empty();
       this.contentArea.createEl("p", {
         cls: "calibre-browse-error",
-        text: `Failed to load library: ${error.message}`,
+        text: `Failed to load library: ${toErrorMessage(error)}`,
       });
     }
   }
@@ -264,7 +265,7 @@ export class CalibreBrowseModal extends Modal {
         textDiv.createEl("small", { text: book.author });
       });
     } catch (error) {
-      loadingEl.textContent = `Error: ${error.message}`;
+      loadingEl.textContent = `Error: ${toErrorMessage(error)}`;
     }
   }
 

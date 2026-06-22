@@ -10,7 +10,6 @@ import {
   Notice,
   Setting,
   TextComponent,
-  DropdownComponent,
   setIcon,
   Platform,
 } from "obsidian";
@@ -96,9 +95,7 @@ export class BookSearchModal extends Modal {
     setIcon(iconEl, service === "calibre" ? "library-big" : "book-open");
 
     headerEl.createEl("h2", {
-      text:
-        (service as string).charAt(0).toUpperCase() +
-        (service as string).slice(1),
+      text: service.charAt(0).toUpperCase() + service.slice(1),
       cls: "book-search-plugin__modal-title",
     });
 
@@ -170,7 +167,7 @@ export class BookSearchModal extends Modal {
         `${languages[defaultLocale] || defaultLocale}`,
       );
       Object.keys(languages).forEach((locale) => {
-        const localeName = languages[locale];
+        const localeName = (languages as Record<string, string>)[locale];
         if (localeName && locale !== defaultLocale)
           dropdown.addOption(locale, localeName);
       });

@@ -1,4 +1,4 @@
-import { App, Modal, Setting, setIcon } from "obsidian";
+import { App, Modal } from "obsidian";
 import { Book } from "@models/book.model";
 
 export class CalibreMultiSelectModal extends Modal {

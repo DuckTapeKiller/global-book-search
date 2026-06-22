@@ -2,6 +2,17 @@ import { Modal, App, Setting } from "obsidian";
 import { EnrichmentResult } from "@models/accuracy.model";
 import { Book } from "@models/book.model";
 
+/** Render a conflict field value for display/comparison without "[object Object]". */
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) return value.map((v) => displayValue(v)).join(", ");
+  return "";
+}
+
 export class ConflictResolverModal extends Modal {
   private resolvedBook: Book;
   private _submitted = false;
@@ -57,8 +68,8 @@ export class ConflictResolverModal extends Modal {
 
         // Pre-select quorum or current value
         if (
-          String(v.value) ===
-          String(this.resolvedBook[conflict.fieldName as keyof Book])
+          displayValue(v.value) ===
+          displayValue(this.resolvedBook[conflict.fieldName as keyof Book])
         ) {
           radio.checked = true;
         }
@@ -76,7 +87,7 @@ export class ConflictResolverModal extends Modal {
         if (radio.checked) optionEl.addClass("is-selected");
 
         const label = optionEl.createEl("label", { attr: { for: optionId } });
-        label.createDiv({ text: String(v.value), cls: "value-text" });
+        label.createDiv({ text: displayValue(v.value), cls: "value-text" });
 
         const sourceRow = label.createDiv({ cls: "source-row" });
         sourceRow.createSpan({ text: v.source, cls: "source-name" });

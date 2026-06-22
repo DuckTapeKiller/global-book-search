@@ -156,7 +156,7 @@ export class BookNoteCreator {
       if (typeof value === "string") {
         resolvedFrontmatter[key] = replaceVariableSyntax(book, value);
       } else if (Array.isArray(value)) {
-        resolvedFrontmatter[key] = value.map((v) =>
+        resolvedFrontmatter[key] = (value as unknown[]).map((v) =>
           typeof v === "string" ? replaceVariableSyntax(book, v) : v,
         );
       } else {

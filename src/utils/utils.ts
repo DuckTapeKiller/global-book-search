@@ -14,12 +14,26 @@ export function isISBN(str: string) {
   return /^(97(8|9))?\d{9}(\d|X)$/.test(str);
 }
 
+/** Render an unknown scalar as a string, without ever producing "[object Object]". */
+function stringifyValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  return "";
+}
+
 export function makeFileName(
   book: Book,
   fileNameFormat?: string,
   extension = "md",
 ) {
-  let result;
+  let result: string;
   if (fileNameFormat) {
     result = replaceVariableSyntax(book, replaceDateInString(fileNameFormat));
   } else {
@@ -28,11 +42,14 @@ export function makeFileName(
   return replaceIllegalFileNameCharactersInString(result) + `.${extension}`;
 }
 
-export function changeSnakeCase(book: Book) {
-  return Object.entries(book).reduce((acc, [key, value]) => {
-    acc[camelToSnakeCase(key)] = value;
-    return acc;
-  }, {});
+export function changeSnakeCase(book: Book): Record<string, unknown> {
+  return Object.entries(book).reduce<Record<string, unknown>>(
+    (acc, [key, value]) => {
+      acc[camelToSnakeCase(key)] = value;
+      return acc;
+    },
+    {},
+  );
 }
 
 export function applyDefaultFrontMatter(
@@ -45,12 +62,12 @@ export function applyDefaultFrontMatter(
       ? parseFrontMatter(frontmatter)
       : frontmatter;
 
-  const bookData =
+  const bookData: Record<string, unknown> =
     keyType === DefaultFrontmatterKeyType.camelCase
-      ? book
-      : (changeSnakeCase(book) as Record<string, unknown>);
+      ? { ...book }
+      : changeSnakeCase(book);
 
-  const result = { ...extraFrontMatter };
+  const result: Record<string, unknown> = { ...extraFrontMatter };
 
   // Add book data only if it doesn't exist in extraFrontMatter (case-insensitive check)
   const existingKeys = new Set(Object.keys(result).map((k) => k.toLowerCase()));
@@ -75,28 +92,35 @@ export function replaceVariableSyntax(book: Book, text: string): string {
     return "";
   }
 
-  const entries = Object.entries(book);
+  const entries = Object.entries(book) as [string, unknown][];
 
   return entries
-    .reduce((result, [key, val = ""]) => {
+    .reduce((result, [key, val]) => {
       if (Array.isArray(val)) {
         // Check if the variable is wrapped in quotes in the template: "{{key}}"
         const quotedRegex = new RegExp(`(['"]){{${key}}}(['"])`, "ig");
         if (quotedRegex.test(result)) {
-          const commaString = val.map((v) => v.trim()).join(", ");
+          const commaString = val
+            .map((v) => stringifyValue(v).trim())
+            .join(", ");
           return result.replace(quotedRegex, `$1${commaString}$2`);
         }
-        const listString = val.map((v) => `\n  - ${v}`).join("");
+        const listString = val
+          .map((v) => `\n  - ${stringifyValue(v)}`)
+          .join("");
         return result.replace(new RegExp(`{{${key}}}`, "ig"), listString);
       }
-      return result.replace(new RegExp(`{{${key}}}`, "ig"), String(val));
+      return result.replace(
+        new RegExp(`{{${key}}}`, "ig"),
+        stringifyValue(val),
+      );
     }, text)
     .replace(/{{\w+}}/gi, "")
     .trim();
 }
 
-export function camelToSnakeCase(str) {
-  return str.replace(/[A-Z]/g, (letter) => `_${letter?.toLowerCase()}`);
+export function camelToSnakeCase(str: string): string {
+  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
 export function parseFrontMatter(frontMatterString: string) {
@@ -121,7 +145,7 @@ export function parseFrontMatter(frontMatterString: string) {
 }
 
 export function toStringFrontMatter(frontMatter: object): string {
-  return Object.entries(frontMatter)
+  return (Object.entries(frontMatter) as [string, unknown][])
     .map(([key, newValue]) => {
       const isDescriptionKey =
         key.toLowerCase() === "description" ||
@@ -130,11 +154,13 @@ export function toStringFrontMatter(frontMatter: object): string {
 
       if (Array.isArray(newValue)) {
         if (newValue.length === 0) return "";
-        const listValues = newValue.map((v) => `  - ${v}`).join("\n");
+        const listValues = newValue
+          .map((v) => `  - ${stringifyValue(v)}`)
+          .join("\n");
         return `${key}:\n${listValues}\n`;
       }
 
-      let stringValue = newValue?.toString().trim() ?? "";
+      let stringValue = stringifyValue(newValue).trim();
       if (stringValue === "" || stringValue === '""') {
         return `${key}: ""\n`;
       }
@@ -165,7 +191,7 @@ export function toStringFrontMatter(frontMatter: object): string {
 
         const escapedValue = stringValue.replace(
           /"|'/gu,
-          (match, offset, fullText) => {
+          (match: string, offset: number, fullText: string) => {
             if (match === '"') {
               const char = isOpening ? "«" : "»";
               isOpening = !isOpening;
@@ -229,7 +255,7 @@ export function toStringFrontMatter(frontMatter: object): string {
 }
 
 export function getDate(input?: { format?: string; offset?: number }) {
-  let duration;
+  let duration: ReturnType<typeof window.moment.duration> | undefined;
 
   if (
     input?.offset !== null &&
@@ -280,7 +306,7 @@ export function replaceDateInString(input: string) {
   return output;
 }
 
-function replacer(str: string, reg: RegExp, replaceValue) {
+function replacer(str: string, reg: RegExp, replaceValue: string) {
   return str.replace(reg, function () {
     return replaceValue;
   });
@@ -299,7 +325,7 @@ export function createBookTags(
       .replace(/[^\p{L}\p{N}_]/gu, "");
   };
 
-  const tags = [];
+  const tags: string[] = [];
 
   // 1. Author tag (primary)
   const authorName =

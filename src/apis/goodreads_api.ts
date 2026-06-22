@@ -9,7 +9,7 @@ import { getHttpConfig, httpRequest, looksLikeBotChallenge } from "@utils/http";
  * cover, …). Goodreads serves bot-challenge pages that parse to all-blank
  * books; clobbering with those produced empty notes.
  */
-export function mergeBookData(base: Book, extracted: Book): Book {
+export function mergeBookData(base: Partial<Book>, extracted: Book): Book {
   const merged: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(extracted)) {
     const isEmpty =
@@ -104,7 +104,8 @@ function decodeHtmlEntities(value: string): string {
 }
 
 function digitsOnly(value: unknown): string {
-  return String(value ?? "").replace(/[^0-9X]/gi, "");
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  return String(value).replace(/[^0-9X]/gi, "");
 }
 
 /**
@@ -145,7 +146,11 @@ export function parseLdJsonBook(html: string): Partial<Book> {
       const isbn = digitsOnly(rec.isbn);
       if (isbn.length === 13 && !out.isbn13) out.isbn13 = isbn;
       if (isbn.length === 10 && !out.isbn10) out.isbn10 = isbn;
-      if (!out.totalPage && rec.numberOfPages != null) {
+      if (
+        !out.totalPage &&
+        (typeof rec.numberOfPages === "number" ||
+          typeof rec.numberOfPages === "string")
+      ) {
         out.totalPage = String(rec.numberOfPages);
       }
       if (!out.publisher) {
@@ -157,7 +162,9 @@ export function parseLdJsonBook(html: string): Partial<Book> {
         if (typeof name === "string") out.publisher = decodeHtmlEntities(name);
       }
       if (!out.coverUrl) {
-        const img = Array.isArray(rec.image) ? rec.image[0] : rec.image;
+        const img: unknown = Array.isArray(rec.image)
+          ? (rec.image as unknown[])[0]
+          : rec.image;
         if (typeof img === "string") out.coverUrl = img;
       }
       if (!out.description && typeof rec.description === "string") {
@@ -165,8 +172,12 @@ export function parseLdJsonBook(html: string): Partial<Book> {
       }
       if (!out.categories && rec.genre != null) {
         const genre = Array.isArray(rec.genre)
-          ? rec.genre.join(", ")
-          : String(rec.genre);
+          ? (rec.genre as unknown[])
+              .filter((g): g is string => typeof g === "string")
+              .join(", ")
+          : typeof rec.genre === "string"
+            ? rec.genre
+            : "";
         if (genre.trim()) {
           out.categories = genre;
           out.category = genre;
@@ -352,9 +363,9 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     if (!bookRef || !this.isRecord(apolloState[bookRef])) return {};
 
     const bookJson = apolloState[bookRef] as Record<string, unknown>;
-    const details = (
-      this.isRecord(bookJson["details"]) ? bookJson["details"] : {}
-    ) as Record<string, unknown>;
+    const details: Record<string, unknown> = this.isRecord(bookJson["details"])
+      ? bookJson["details"]
+      : {};
 
     // Contributors (role-aware): prefer real Authors over Translators/Editors/etc.
     const authors: string[] = [];
@@ -692,22 +703,20 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         const bookId =
           typeof bookIdRaw === "number"
             ? String(bookIdRaw)
-            : (bookIdRaw as string | undefined);
+            : typeof bookIdRaw === "string"
+              ? bookIdRaw
+              : "";
         if (!bookId) continue;
 
-        const title = String(obj.title || "")
-          .trim()
-          .replace(/"/g, "'");
+        const title = this.asString(obj.title).replace(/"/g, "'");
         if (!title) continue;
 
-        const authorObj = obj.author as unknown;
-        const authorName =
-          (authorObj && typeof authorObj === "object"
-            ? String((authorObj as { name?: unknown }).name || "")
-            : "") ||
-          String(obj.authorName || obj.author_name || obj.author || "")
-            .trim()
-            .replace(/\s+/g, " ");
+        const authorName = (
+          this.asString(this.getPath(obj, ["author", "name"])) ||
+          this.asString(obj.authorName) ||
+          this.asString(obj.author_name) ||
+          this.asString(obj.author)
+        ).replace(/\s+/g, " ");
 
         const link =
           (typeof obj.url === "string" && obj.url.startsWith("http")
@@ -718,14 +727,11 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         seen.add(link);
 
         const coverUrl =
-          String(
-            obj.imageUrl ||
-              obj.image_url ||
-              obj.bookImageUrl ||
-              obj.book_image_url ||
-              obj.book_small_image_url ||
-              "",
-          ) || "";
+          this.asString(obj.imageUrl) ||
+          this.asString(obj.image_url) ||
+          this.asString(obj.bookImageUrl) ||
+          this.asString(obj.book_image_url) ||
+          this.asString(obj.book_small_image_url);
 
         const descriptionHtml =
           this.asString(this.getPath(obj, ["description", "html"])) ||
@@ -743,7 +749,9 @@ export class GoodreadsApi implements BaseBooksApiImpl {
           description,
           publisher: "",
           publishDate: "",
-          totalPage: obj.numPages ? String(obj.numPages) : "",
+          totalPage: this.asNumber(obj.numPages)
+            ? String(this.asNumber(obj.numPages))
+            : "",
           isbn10: "",
           isbn13: "",
           categories: "",
@@ -803,7 +811,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         const cross = await this.fetchCrossSource(result);
         if (cross) {
           // result (Goodreads) wins where present; cross-source fills the gaps.
-          result = mergeBookData(cross as Book, result);
+          result = mergeBookData(cross, result);
         }
       } catch (error) {
         console.warn("Goodreads cross-source enrichment failed", error);
@@ -906,7 +914,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
       const parsed = this.parseDetailHtml(res.text, canonicalLink || url);
       return parsed.title.trim() ? parsed : null;
     } catch (error) {
-      console.warn("Goodreads route failed", { url, error });
+      console.warn(`Goodreads route failed: ${url}`, error);
       return null;
     }
   }
@@ -916,8 +924,8 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     const doc = this.parseHtml(html);
     let parsed = this.extractBook(doc, link);
     // Structure-independent layers fill any gaps the primary parse left.
-    parsed = mergeBookData(parseLdJsonBook(html) as Book, parsed);
-    parsed = mergeBookData(parseOgMetaBook(html) as Book, parsed);
+    parsed = mergeBookData(parseLdJsonBook(html), parsed);
+    parsed = mergeBookData(parseOgMetaBook(html), parsed);
     return parsed;
   }
 
@@ -938,7 +946,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         },
         { providerId: "goodreads", purpose: "isbn_to_id", cacheTtlMs: 600_000 },
       );
-      const headers = (res.headers || {}) as Record<string, string>;
+      const headers = res.headers || {};
       const location = headers["location"] || headers["Location"] || "";
       // Pull the id from the redirect target, or from the body if one wasn't
       // exposed (a numeric id is sometimes returned as plain text).
@@ -1106,7 +1114,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
       );
       const docs = this.getPath(res.json, ["docs"]);
       if (!Array.isArray(docs) || docs.length === 0) return null;
-      const doc = docs[0];
+      const doc: unknown = (docs as unknown[])[0];
 
       let isbn13 = "";
       let isbn10 = "";
@@ -1241,7 +1249,11 @@ export class GoodreadsApi implements BaseBooksApiImpl {
               numberOfPages?: unknown;
               image?: unknown;
             };
-            if (data["@type"] === "Book" && data.numberOfPages) {
+            if (
+              data["@type"] === "Book" &&
+              (typeof data.numberOfPages === "number" ||
+                typeof data.numberOfPages === "string")
+            ) {
               totalPage = String(data.numberOfPages);
             }
           } catch {

@@ -1,6 +1,13 @@
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
 import { httpRequest } from "@utils/http";
+import {
+  asRecord,
+  getArray,
+  getNumber,
+  getString,
+  getStringArray,
+} from "@utils/json";
 
 interface CalibreLibraryInfo {
   tags: string[];
@@ -43,9 +50,14 @@ export class CalibreApi implements BaseBooksApiImpl {
         throw new Error(`Calibre Server returned status ${searchRes.status}`);
       }
 
-      const searchData = searchRes.json;
-      // searchData.book_ids is a list of book IDs
-      const bookIds: string[] = searchData.book_ids || [];
+      const searchData = asRecord(searchRes.json);
+      // searchData.book_ids is a list of book IDs (numbers in the JSON).
+      const bookIds: string[] = getArray(searchData.book_ids)
+        .filter(
+          (v): v is number | string =>
+            typeof v === "number" || typeof v === "string",
+        )
+        .map((v) => String(v));
 
       // Limit results to avoid overwhelming requests
       const topBookIds = bookIds.slice(0, 20);
@@ -71,43 +83,20 @@ export class CalibreApi implements BaseBooksApiImpl {
    */
   async getLibraryInfo(): Promise<CalibreLibraryInfo> {
     try {
-      const validLibraryId = this.libraryId || "calibre";
-
-      // Get categories/tags
-      const categoriesUrl = `${this.serverUrl}/ajax/categories/${validLibraryId}`;
-      const categoriesRes = await httpRequest(
-        {
-          url: categoriesUrl,
-          method: "GET",
-          headers: { Accept: "application/json" },
-        },
-        {
-          providerId: "calibre",
-          purpose: "categories",
-          responseType: "json",
-          cacheTtlMs: 60_000,
-        },
-      );
-
-      const categories = categoriesRes.json || [];
-
-      // Parse out tags, series, authors from categories
-      let tags: string[] = [];
-      let series: Array<{ name: string; count: number }> = [];
-      let authors: string[] = [];
-
+      // The per-category endpoints below provide the structured
+      // tag/series/author data we need.
       const [tagItems, seriesItems, authorItems] = await Promise.all([
         this.getCategoryItems("tags"),
         this.getCategoryItems("series"),
         this.getCategoryItems("authors"),
       ]);
 
-      tags = tagItems.map((t: { name: string }) => t.name);
-      series = seriesItems.map((s: { name: string; count?: number }) => ({
+      const tags = tagItems.map((t) => t.name);
+      const series = seriesItems.map((s) => ({
         name: s.name,
-        count: s.count || 0,
+        count: s.count ?? 0,
       }));
-      authors = authorItems.map((a: { name: string }) => a.name);
+      const authors = authorItems.map((a) => a.name);
 
       return { tags, series, authors };
     } catch (error) {
@@ -140,9 +129,15 @@ export class CalibreApi implements BaseBooksApiImpl {
         },
       );
 
-      const data = res.json;
       // Calibre returns { items: [...], total_num: N }
-      return data.items || [];
+      const data = asRecord(res.json);
+      const items: Array<{ name: string; count?: number }> = [];
+      for (const item of getArray(data.items)) {
+        const rec = asRecord(item);
+        const name = getString(rec.name);
+        if (name) items.push({ name, count: getNumber(rec.count) });
+      }
+      return items;
     } catch (error) {
       console.warn(`Failed to get ${category} items`, error);
       return [];
@@ -209,16 +204,15 @@ export class CalibreApi implements BaseBooksApiImpl {
       },
     );
 
-    const data = bookRes.json;
+    const data = asRecord(bookRes.json);
 
     // Remove trailing slash from serverUrl if present
     const cleanServerUrl = this.serverUrl.replace(/\/$/, "");
     const validLibraryId = this.libraryId || "calibre";
 
     // Try to find cover in data, or construct standard URL
-    let coverUrl = "";
-    if (data.cover) {
-      coverUrl = data.cover;
+    let coverUrl = getString(data.cover);
+    if (coverUrl) {
       if (coverUrl.startsWith("/")) {
         coverUrl = `${cleanServerUrl}${coverUrl}`;
       }
@@ -227,48 +221,42 @@ export class CalibreApi implements BaseBooksApiImpl {
     }
 
     // Map metadata
-    const title = data.title;
-    const authors = data.authors || [];
+    const title = getString(data.title);
+    const authors = getStringArray(data.authors);
     const author = authors.join(", ");
 
     // Clean HTML from comments/description
-    const rawDescription = data.comments || "";
-    const description = rawDescription.replace(/<[^>]*>?/gm, "");
+    const description = getString(data.comments).replace(/<[^>]*>?/gm, "");
 
     // ISBN parsing
-    const identifiers = data.identifiers || {};
+    const identifiers = asRecord(data.identifiers);
+    const isbnAny = getString(identifiers["isbn"]);
     const isbn13 =
-      identifiers["isbn13"] ||
-      identifiers["isbn-13"] ||
-      (identifiers["isbn"]?.length === 13 ? identifiers["isbn"] : "") ||
-      "";
+      getString(identifiers["isbn13"]) ||
+      getString(identifiers["isbn-13"]) ||
+      (isbnAny.length === 13 ? isbnAny : "");
     const isbn10 =
-      identifiers["isbn10"] ||
-      identifiers["isbn-10"] ||
-      (identifiers["isbn"]?.length === 10 ? identifiers["isbn"] : "") ||
-      "";
+      getString(identifiers["isbn10"]) ||
+      getString(identifiers["isbn-10"]) ||
+      (isbnAny.length === 10 ? isbnAny : "");
     const ids = isbn13 || isbn10 || "";
 
     // Publisher and date
-    const publisher = data.publisher || "";
-    const publishDate = data.pubdate || "";
+    const publisher = getString(data.publisher);
+    const publishDate = getString(data.pubdate);
 
     // Published Date - Year only
     let publishedYear = "";
     if (publishDate) {
-      try {
-        const date = new Date(publishDate);
-        if (!isNaN(date.getTime())) {
-          publishedYear = date.getFullYear().toString();
-        }
-      } catch {
-        console.warn("Failed to parse date", publishDate);
+      const date = new Date(publishDate);
+      if (!isNaN(date.getTime())) {
+        publishedYear = date.getFullYear().toString();
       }
     }
 
     // Series information
-    const seriesInfo = data.series || null;
-    const seriesIndex = data.series_index || null;
+    const seriesInfo = getString(data.series);
+    const seriesIndexRaw = data.series_index;
 
     let series = "";
     let seriesNumber: number | undefined;
@@ -277,22 +265,19 @@ export class CalibreApi implements BaseBooksApiImpl {
     if (seriesInfo) {
       series = seriesInfo;
       seriesLink = `[[${seriesInfo}]]`;
-      if (seriesIndex !== null && seriesIndex !== undefined) {
-        seriesNumber =
-          typeof seriesIndex === "number"
-            ? seriesIndex
-            : parseFloat(seriesIndex);
+      if (typeof seriesIndexRaw === "number") {
+        seriesNumber = seriesIndexRaw;
+      } else if (typeof seriesIndexRaw === "string") {
+        seriesNumber = parseFloat(seriesIndexRaw);
       }
     }
 
     // Custom columns (if available)
     const customColumns: Record<string, unknown> = {};
-    if (data.user_metadata) {
-      for (const [key, value] of Object.entries(data.user_metadata)) {
-        const colData = value as { "#value#"?: unknown; name?: string };
-        if (colData && colData["#value#"] !== undefined) {
-          customColumns[key] = colData["#value#"];
-        }
+    for (const [key, value] of Object.entries(asRecord(data.user_metadata))) {
+      const colData = asRecord(value);
+      if (colData["#value#"] !== undefined) {
+        customColumns[key] = colData["#value#"];
       }
     }
 
@@ -302,7 +287,7 @@ export class CalibreApi implements BaseBooksApiImpl {
       author,
       authors,
       category: "",
-      categories: (data.tags || []).join(", "),
+      categories: getStringArray(data.tags).join(", "),
       publisher,
       publishDate: publishedYear,
       totalPage: "",

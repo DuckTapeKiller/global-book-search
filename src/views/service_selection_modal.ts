@@ -1,13 +1,8 @@
-import { Modal, Setting, Platform, setIcon } from "obsidian";
+import { Modal, Platform, setIcon } from "obsidian";
 import BookSearchPlugin from "@src/main";
-import { getProviderHealth } from "@utils/provider_health";
 import { BulkImportModal } from "@views/bulk_import_modal";
-
-function formatHealthBadge(providerId: string): string | null {
-  const h = getProviderHealth(providerId);
-  if (h.consecutiveFailures === 0 && !h.lastErrorAt) return null;
-  return h.status.toUpperCase();
-}
+import { toErrorMessage } from "@utils/json";
+import { appendHealthDot } from "./health_dot";
 
 export class ServiceSelectionModal extends Modal {
   constructor(private plugin: BookSearchPlugin) {
@@ -115,17 +110,12 @@ export class ServiceSelectionModal extends Modal {
       ];
 
       services.forEach((service) => {
-        const health = formatHealthBadge(service.value);
         const btn = buttonContainer.createEl("button", {
           cls: "mod-cta",
         });
 
         btn.createSpan({ text: service.label });
-        if (health === null) {
-          btn.createSpan({ cls: "bsp-health-dot bsp-health-dot--ok" });
-        } else {
-          btn.createSpan({ text: ` (${health})` });
-        }
+        appendHealthDot(btn, service.value);
 
         btn.addEventListener("click", () => {
           void (async () => {
@@ -148,7 +138,7 @@ export class ServiceSelectionModal extends Modal {
                 }, 10);
               });
             } catch (err) {
-              if (err.message !== "Cancelled request") {
+              if (toErrorMessage(err) !== "Cancelled request") {
                 console.warn(err);
               }
             } finally {

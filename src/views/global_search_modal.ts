@@ -9,13 +9,7 @@ import {
 import BookSearchPlugin from "@src/main";
 import { globalSearch, BookWithSource } from "@apis/global_search";
 import { BarcodeScannerModal } from "./barcode_scanner_modal";
-import { getProviderHealth } from "@utils/provider_health";
-
-function healthLabel(id: string): string | null {
-  const h = getProviderHealth(id);
-  if (h.consecutiveFailures === 0 && !h.lastErrorAt) return null;
-  return h.status.toUpperCase();
-}
+import { appendHealthDot } from "./health_dot";
 
 export class GlobalSearchModal extends Modal {
   private query: string;
@@ -64,13 +58,8 @@ export class GlobalSearchModal extends Modal {
       ];
 
       providers.forEach((p, index) => {
-        const label = healthLabel(p.id);
         subtitleEl.createSpan({ text: p.label });
-        if (label === null) {
-          subtitleEl.createSpan({ cls: "bsp-health-dot bsp-health-dot--ok" });
-        } else {
-          subtitleEl.createSpan({ text: ` (${label})` });
-        }
+        appendHealthDot(subtitleEl, p.id);
         if (index < providers.length - 1) {
           subtitleEl.createSpan({ text: " · " });
         }
@@ -140,9 +129,8 @@ export class GlobalSearchModal extends Modal {
 
     this.isBusy = true;
     this.modalEl.addClass("is-searching");
-    const searchButton = this.contentEl.querySelector(
-      "button.mod-cta",
-    ) as HTMLButtonElement;
+    const searchButton =
+      this.contentEl.querySelector<HTMLButtonElement>("button.mod-cta");
     const originalText = searchButton.textContent;
     searchButton.textContent = "Searching...";
     searchButton.disabled = true;

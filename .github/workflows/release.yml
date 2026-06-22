@@ -49,7 +49,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Fix for "Lint" error: Run build directly
+      # Run the official Obsidian lint (eslint-plugin-obsidianmd) + type-check
+      # before building, so a release fails fast on the same issues the
+      # community-plugin review bot would flag.
+      - name: Lint (official Obsidian rules)
+        run: pnpm run lint
+
       - name: Build Plugin
         id: build
         run: |

@@ -40,12 +40,12 @@ export class BarcodeScannerModal extends Modal {
       cls: "book-search-barcode-controls",
     });
 
-    const switchBtn = new ButtonComponent(controls)
+    new ButtonComponent(controls)
       .setButtonText("Switch Camera")
       .setClass("mod-secondary")
       .onClick(() => this.switchCamera());
 
-    const cancelBtn = new ButtonComponent(controls)
+    new ButtonComponent(controls)
       .setButtonText("Cancel")
       .onClick(() => this.close());
 
@@ -82,7 +82,7 @@ export class BarcodeScannerModal extends Modal {
     if (this.html5QrCode) {
       try {
         await this.html5QrCode.stop();
-      } catch (err) {
+      } catch {
         // ignore
       }
     }
@@ -141,15 +141,11 @@ export class BarcodeScannerModal extends Modal {
     await this.startScanning();
   }
 
-  async onClose() {
-    if (this.html5QrCode) {
-      try {
-        if (this.isScanning) {
-          await this.html5QrCode.stop();
-        }
-      } catch (err) {
-        console.error("Failed to stop scanner:", err);
-      }
+  onClose() {
+    if (this.html5QrCode && this.isScanning) {
+      this.html5QrCode
+        .stop()
+        .catch((err) => console.error("Failed to stop scanner:", err));
     }
     this.contentEl.empty();
   }

@@ -34,7 +34,14 @@ export function applyTemplateTransformations(
 ): string {
   return rawTemplateContents.replace(
     /{{\s*(date|time)\s*(([+-]\d+)([yqmwdhs]))?\s*(:.+?)?}}/gi,
-    (_, _timeOrDate, calc, timeDelta, unit, momentFormat) => {
+    (
+      _match: string,
+      _timeOrDate: string,
+      calc: string | undefined,
+      timeDelta: string | undefined,
+      unit: string | undefined,
+      momentFormat: string | undefined,
+    ) => {
       const now = window.moment();
       const currentDate = window
         .moment()
@@ -45,9 +52,8 @@ export function applyTemplateTransformations(
           second: now.get("second"),
         });
       if (calc) {
-        // Fix: Cast unit to satisfy linter
         currentDate.add(
-          parseInt(timeDelta, 10),
+          parseInt(timeDelta ?? "0", 10),
           unit as moment.unitOfTime.DurationConstructor,
         );
       }
@@ -110,10 +116,20 @@ export function executeInlineScriptsTemplates(
   });
 }
 
+interface TemplaterPlugin {
+  templater?: { overwrite_file_commands: (file: TFile) => Promise<void> };
+  settings?: Record<string, unknown>;
+}
+
 export async function useTemplaterPluginInFile(app: App, file: TFile) {
-  // @ts-ignore
-  const templater = app.plugins.plugins["templater-obsidian"];
-  if (templater && !templater?.settings["trigger_on_file_creation"]) {
-    await templater.templater.overwrite_file_commands(file);
+  // `app.plugins` is part of Obsidian's internal (untyped) API.
+  const plugins = (
+    app as App & {
+      plugins?: { plugins?: Record<string, TemplaterPlugin | undefined> };
+    }
+  ).plugins;
+  const templater = plugins?.plugins?.["templater-obsidian"];
+  if (templater && !templater.settings?.["trigger_on_file_creation"]) {
+    await templater.templater?.overwrite_file_commands(file);
   }
 }

@@ -8,6 +8,7 @@ import { OpenLibraryApi } from "@apis/open_library_api";
 import { GoodreadsApi } from "@apis/goodreads_api";
 import { StoryGraphApi } from "@apis/storygraph_api";
 import { scoreBookCandidate } from "@utils/edition_score";
+import { getArray, getProp } from "@utils/json";
 
 import {
   BookEdition,
@@ -24,6 +25,15 @@ export interface BookWithSource extends Book {
 }
 
 const PROVIDER_ORDER = ["goodreads", "google", "openlibrary", "storygraph"];
+
+/** Render a field value as a comparable string without producing "[object Object]". */
+function comparableString(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
 
 async function timeoutReject<T>(ms: number, providerName: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -138,9 +148,9 @@ async function fetchLocData(
       ),
     ]);
 
-    const data = JSON.parse((response as { text: string }).text);
-    const results: unknown[] = data?.results;
-    if (!results || results.length === 0) return null;
+    const data: unknown = JSON.parse(response.text);
+    const results = getArray(getProp(data, "results"));
+    if (results.length === 0) return null;
 
     const result = results[0] as {
       date?: string;
@@ -243,7 +253,7 @@ export async function globalSearch(
         ...book,
         _sourceIds: [providerId],
         _sourceLabels: [GLOBAL_SEARCH_SOURCE_LABELS[providerId] || providerId],
-      })) as BookWithSource[];
+      }));
     } catch (error) {
       console.warn(`Global Search: Provider ${providerId} failed`, error);
       onProgress?.(`${GLOBAL_SEARCH_SOURCE_LABELS[providerId]} — no results`);
@@ -300,17 +310,17 @@ export async function globalSearch(
             ...book,
             _providerId: book._sourceIds[0],
             score: scoreBookCandidate(book),
-          } as BookEdition);
+          });
         }
       }
     } else {
-      const newWork = { ...book, _editions: [] };
+      const newWork: BookWithSource = { ...book, _editions: [] };
       if (book.isbn13 || book.isbn10) {
-        newWork._editions.push({
+        newWork._editions?.push({
           ...book,
           _providerId: book._sourceIds[0],
           score: scoreBookCandidate(book),
-        } as BookEdition);
+        });
       }
       workMap.set(key, newWork);
     }
@@ -859,7 +869,9 @@ function mergeWithConflicts(
     if (allValues.length > 1) {
       // Check for conflict
       const distinctValues = [
-        ...new Set(allValues.map((v) => String(v.value).toLowerCase().trim())),
+        ...new Set(
+          allValues.map((v) => comparableString(v.value).toLowerCase().trim()),
+        ),
       ];
 
       if (distinctValues.length > 1) {
@@ -867,13 +879,13 @@ function mergeWithConflicts(
         const bestValue =
           preferred?.value ?? getQuorumValue(allValues.map((v) => v.value));
         conflicts.push({
-          fieldName: field.name as string,
+          fieldName: field.name,
           label: field.label,
           values: allValues.map((v) => ({
             ...v,
             isQuorum:
-              String(v.value).toLowerCase().trim() ===
-              String(bestValue).toLowerCase().trim(),
+              comparableString(v.value).toLowerCase().trim() ===
+              comparableString(bestValue).toLowerCase().trim(),
           })),
           currentBestValue: bestValue,
         });

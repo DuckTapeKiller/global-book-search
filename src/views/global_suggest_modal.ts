@@ -15,7 +15,7 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
   }
 
   onOpen() {
-    super.onOpen();
+    void super.onOpen();
     if (Platform.isMobile) {
       this.inputEl.blur();
     }

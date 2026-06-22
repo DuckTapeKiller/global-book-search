@@ -1,3 +1,5 @@
+import { recordOutcome } from "@utils/provider_history";
+
 export type ProviderHealthStatus = "ok" | "flaky" | "blocked" | "down";
 
 export interface ProviderHealth {
@@ -22,7 +24,7 @@ function classify(
   status?: number,
 ): ProviderHealthStatus {
   const msg = (
-    err instanceof Error ? err.message : String(err || "")
+    err instanceof Error ? err.message : typeof err === "string" ? err : ""
   ).toLowerCase();
 
   // Best-effort heuristics; we intentionally keep this simple and robust.
@@ -83,6 +85,7 @@ export function recordProviderSuccess(providerId: string): ProviderHealth {
     lastSuccessAt: now(),
   };
   healthByProvider.set(providerId, next);
+  recordOutcome(providerId, true);
   return next;
 }
 
@@ -99,9 +102,11 @@ export function recordProviderFailure(
     consecutiveFailures: nextFailures,
     lastErrorAt: now(),
     lastStatusCode: status ?? current.lastStatusCode,
-    lastErrorMessage: err instanceof Error ? err.message : String(err || ""),
+    lastErrorMessage:
+      err instanceof Error ? err.message : typeof err === "string" ? err : "",
   };
   healthByProvider.set(providerId, next);
+  recordOutcome(providerId, false, { status, error: err });
   return next;
 }
 

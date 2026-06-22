@@ -1,29 +1,22 @@
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
 import { httpRequest } from "@utils/http";
-
-interface OpenLibraryDoc {
-  title: string;
-  author_name?: string[];
-  cover_i?: number;
-  isbn?: string[];
-  first_publish_year?: number;
-  publish_date?: string[];
-  publisher?: string[];
-  number_of_pages_median?: number;
-  number_of_pages?: number;
-  key?: string;
-  subject?: string[];
-  original_title?: string;
-}
+import {
+  asRecord,
+  getArray,
+  getNumber,
+  getString,
+  getStringArray,
+  isRecord,
+} from "@utils/json";
 
 interface OpenLibraryEdition {
-  isbn_10?: string[];
-  isbn_13?: string[];
-  isbn?: string[];
+  isbn_10: string[];
+  isbn_13: string[];
+  isbn: string[];
   number_of_pages?: number;
   publish_date?: string;
-  publishers?: string[];
+  publishers: string[];
   description?: string | { value: string };
 }
 
@@ -55,14 +48,8 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
         return [];
       }
 
-      const results = searchRes.json;
-      if (!results.docs || !Array.isArray(results.docs)) {
-        return [];
-      }
-
-      return results.docs.map((doc: OpenLibraryDoc) =>
-        this.mapResultToBook(doc),
-      );
+      const results = asRecord(searchRes.json);
+      return getArray(results.docs).map((doc) => this.mapResultToBook(doc));
     } catch (error) {
       console.warn("OpenLibrary search error", error);
       return [];
@@ -96,38 +83,32 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
           },
         );
 
-        if (editionsRes.status === 200 && editionsRes.json.entries) {
-          const entries = editionsRes.json.entries;
+        if (editionsRes.status === 200) {
+          const data = asRecord(editionsRes.json);
+          const entries = getArray(data.entries).map((e) => this.toEdition(e));
+          const hasIsbn = (e: OpenLibraryEdition): boolean =>
+            e.isbn_10.length > 0 || e.isbn_13.length > 0 || e.isbn.length > 0;
           // Find an edition with ISBN or pages
           const bestEdition =
-            entries.find(
-              (e: OpenLibraryEdition) =>
-                (e.isbn_10 || e.isbn_13 || e.isbn) && e.number_of_pages,
-            ) ||
-            entries.find(
-              (e: OpenLibraryEdition) => e.isbn_10 || e.isbn_13 || e.isbn,
-            ) ||
+            entries.find((e) => hasIsbn(e) && e.number_of_pages) ||
+            entries.find((e) => hasIsbn(e)) ||
             entries[0];
 
           if (bestEdition) {
             // Update book with edition info
             book.isbn10 =
-              bestEdition.isbn_10?.[0] ||
-              (Array.isArray(bestEdition.isbn)
-                ? bestEdition.isbn.find((id: string) => id.length === 10)
-                : "") ||
+              bestEdition.isbn_10[0] ||
+              bestEdition.isbn.find((id) => id.length === 10) ||
               book.isbn10;
             book.isbn13 =
-              bestEdition.isbn_13?.[0] ||
-              (Array.isArray(bestEdition.isbn)
-                ? bestEdition.isbn.find((id: string) => id.length === 13)
-                : "") ||
+              bestEdition.isbn_13[0] ||
+              bestEdition.isbn.find((id) => id.length === 13) ||
               book.isbn13;
             book.totalPage = bestEdition.number_of_pages || book.totalPage;
             if (bestEdition.publish_date) {
               book.publishDate = bestEdition.publish_date;
             }
-            if (bestEdition.publishers && bestEdition.publishers.length > 0) {
+            if (bestEdition.publishers.length > 0) {
               book.publisher = bestEdition.publishers[0];
             }
             // Sometimes description is only in editions
@@ -157,12 +138,12 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
         );
 
         if (detailRes.status === 200) {
-          const detail = detailRes.json;
-          book.isbn10 = detail.isbn_10?.[0] || book.isbn10;
-          book.isbn13 = detail.isbn_13?.[0] || book.isbn13;
+          const detail = this.toEdition(detailRes.json);
+          book.isbn10 = detail.isbn_10[0] || book.isbn10;
+          book.isbn13 = detail.isbn_13[0] || book.isbn13;
           book.totalPage = detail.number_of_pages || book.totalPage;
           if (detail.publish_date) book.publishDate = detail.publish_date;
-          if (detail.publishers?.[0]) book.publisher = detail.publishers[0];
+          if (detail.publishers[0]) book.publisher = detail.publishers[0];
           if (!book.description && detail.description) {
             book.description =
               typeof detail.description === "string"
@@ -179,44 +160,67 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
     }
   }
 
-  private mapResultToBook(doc: OpenLibraryDoc): Book {
-    const title = doc.title || "";
-    const author = doc.author_name ? doc.author_name[0] : "";
-    const authors = doc.author_name || [];
+  /** Normalise a raw edition/detail JSON object into a typed edition. */
+  private toEdition(raw: unknown): OpenLibraryEdition {
+    const r = asRecord(raw);
+    const desc = r.description;
+    return {
+      isbn_10: getStringArray(r.isbn_10),
+      isbn_13: getStringArray(r.isbn_13),
+      isbn: getStringArray(r.isbn),
+      number_of_pages: getNumber(r.number_of_pages),
+      publish_date: getString(r.publish_date) || undefined,
+      publishers: getStringArray(r.publishers),
+      description:
+        typeof desc === "string"
+          ? desc
+          : isRecord(desc)
+            ? { value: getString(desc.value) }
+            : undefined,
+    };
+  }
+
+  private mapResultToBook(raw: unknown): Book {
+    const doc = asRecord(raw);
+    const title = getString(doc.title);
+    const authors = getStringArray(doc.author_name);
+    const author = authors[0] || "";
+    const isbns = getStringArray(doc.isbn);
 
     // Cover Image
+    const coverId = getNumber(doc.cover_i);
     let coverUrl = "";
-    if (doc.cover_i) {
-      coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
-    } else if (doc.isbn && doc.isbn[0]) {
-      coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-L.jpg`;
+    if (coverId) {
+      coverUrl = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+    } else if (isbns[0]) {
+      coverUrl = `https://covers.openlibrary.org/b/isbn/${isbns[0]}-L.jpg`;
     }
 
     // Publish Date - OpenLibrary gives multiple, pick first valid
-    let publishDate = "";
-    if (doc.first_publish_year) {
-      publishDate = doc.first_publish_year.toString();
-    } else if (doc.publish_date && doc.publish_date.length > 0) {
-      publishDate = doc.publish_date[0];
-    }
+    const firstPublishYear = getNumber(doc.first_publish_year);
+    const publishDates = getStringArray(doc.publish_date);
+    const publishDate = firstPublishYear
+      ? firstPublishYear.toString()
+      : publishDates[0] || "";
 
     // Publisher
-    const publisher = doc.publisher ? doc.publisher[0] : "";
+    const publisher = getStringArray(doc.publisher)[0] || "";
 
     // ISBN
-    const isbn10 =
-      (doc.isbn || []).find((id: string) => id.length === 10) || "";
-    const isbn13 =
-      (doc.isbn || []).find((id: string) => id.length === 13) || "";
+    const isbn10 = isbns.find((id) => id.length === 10) || "";
+    const isbn13 = isbns.find((id) => id.length === 13) || "";
 
     // Pages
-    const totalPage =
-      doc.number_of_pages_median ||
-      (doc.number_of_pages ? doc.number_of_pages : "");
+    const totalPage: number | string =
+      getNumber(doc.number_of_pages_median) ??
+      getNumber(doc.number_of_pages) ??
+      "";
 
     // Link
-    const key = doc.key;
+    const key = getString(doc.key);
     const link = key ? `https://openlibrary.org${key}` : "";
+
+    const subjects = getStringArray(doc.subject);
 
     return {
       title,
@@ -232,10 +236,10 @@ export class OpenLibraryApi implements BaseBooksApiImpl {
       link,
       previewLink: link,
       description: "", // Search API doesn't always return full description
-      categories: doc.subject?.join(", ") || "",
-      category: doc.subject ? doc.subject[0] : "",
+      categories: subjects.join(", "),
+      category: subjects[0] || "",
       asin: "", // OpenLibrary doesn't use ASIN usually
-      originalTitle: doc.original_title || "",
+      originalTitle: getString(doc.original_title),
       translator: "",
       tags: [], // Initialize tags empty, main.ts populates them
     };
