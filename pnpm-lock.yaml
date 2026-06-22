@@ -32,7 +32,7 @@ importers:
         version: 9.39.2
       eslint-plugin-obsidianmd:
         specifier: ^0.3.0
-        version: 0.3.0(@eslint/js@9.39.2)(@eslint/json@0.14.0)(@typescript-eslint/parser@8.52.0(eslint@9.39.2)(typescript@5.1.6))(eslint@9.39.2)(obsidian@1.13.1(@codemirror/state@6.4.1)(@codemirror/view@6.26.3))(typescript-eslint@8.52.0(eslint@9.39.2)(typescript@5.1.6))
+        version: 0.3.0(@eslint/js@9.39.2)(@eslint/json@0.14.0)(@typescript-eslint/parser@8.52.0(eslint@9.39.2)(typescript@5.1.6))(eslint@9.39.2)(obsidian@1.8.7(@codemirror/state@6.4.1)(@codemirror/view@6.26.3))(typescript-eslint@8.52.0(eslint@9.39.2)(typescript@5.1.6))
       gh-pages:
         specifier: ^6.3.0
         version: 6.3.0
@@ -46,8 +46,8 @@ importers:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@20.12.7)(ts-node@10.9.2(@types/node@20.12.7)(typescript@5.1.6))
       obsidian:
-        specifier: latest
-        version: 1.13.1(@codemirror/state@6.4.1)(@codemirror/view@6.26.3)
+        specifier: 1.8.7
+        version: 1.8.7(@codemirror/state@6.4.1)(@codemirror/view@6.26.3)
       prettier:
         specifier: 3.8.3
         version: 3.8.3
@@ -636,9 +636,6 @@ packages:
 
   '@types/eslint@9.6.1':
     resolution: {integrity: sha512-FXx2pKgId/WyYo2jXw63kk7/+TY7u7AziEJxJAnSFzHlqTAS3Ync6SvgYAN/k4/PQpnnVuzoMuVnByKK2qp0ag==}
-
-  '@types/estree@1.0.5':
-    resolution: {integrity: sha512-/kYRxGDLWzHOB7q+wtSUQlFrtcdUccpfy+X+9iMBpHK8QLLhx2wIPYuS5DYtR9Wa/YlZAbIovy7qVdB1Aq6Lyw==}
 
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
@@ -2341,11 +2338,11 @@ packages:
     resolution: {integrity: sha512-gXah6aZrcUxjWg2zR2MwouP2eHlCBzdV4pygudehaKXSGW4v2AsRQUK+lwwXhii6KFZcunEnmSUoYp5CXibxtA==}
     engines: {node: '>= 0.4'}
 
-  obsidian@1.13.1:
-    resolution: {integrity: sha512-qtTEA2pmhJzhuhJqzbBFRYhpIOqvW+krDYjtFynv66KbxBbumHBlsJfWw3I4jtnK/6fZwbQhCrmmDdRwXmX56w==}
+  obsidian@1.8.7:
+    resolution: {integrity: sha512-h4bWwNFAGRXlMlMAzdEiIM2ppTGlrh7uGOJS6w4gClrsjc+ei/3YAtU2VdFUlCiPuTHpY4aBpFJJW75S1Tl/JA==}
     peerDependencies:
-      '@codemirror/state': 6.5.0
-      '@codemirror/view': 6.38.6
+      '@codemirror/state': ^6.0.0
+      '@codemirror/view': ^6.0.0
 
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
@@ -3747,8 +3744,6 @@ snapshots:
       '@types/estree': 1.0.8
       '@types/json-schema': 7.0.15
 
-  '@types/estree@1.0.5': {}
-
   '@types/estree@1.0.8': {}
 
   '@types/graceful-fs@4.1.9':
@@ -3790,7 +3785,7 @@ snapshots:
 
   '@types/tern@0.23.9':
     dependencies:
-      '@types/estree': 1.0.5
+      '@types/estree': 1.0.8
 
   '@types/yargs-parser@21.0.3': {}
 
@@ -4746,7 +4741,7 @@ snapshots:
     dependencies:
       eslint: 9.39.2
 
-  eslint-plugin-obsidianmd@0.3.0(@eslint/js@9.39.2)(@eslint/json@0.14.0)(@typescript-eslint/parser@8.52.0(eslint@9.39.2)(typescript@5.1.6))(eslint@9.39.2)(obsidian@1.13.1(@codemirror/state@6.4.1)(@codemirror/view@6.26.3))(typescript-eslint@8.52.0(eslint@9.39.2)(typescript@5.1.6)):
+  eslint-plugin-obsidianmd@0.3.0(@eslint/js@9.39.2)(@eslint/json@0.14.0)(@typescript-eslint/parser@8.52.0(eslint@9.39.2)(typescript@5.1.6))(eslint@9.39.2)(obsidian@1.8.7(@codemirror/state@6.4.1)(@codemirror/view@6.26.3))(typescript-eslint@8.52.0(eslint@9.39.2)(typescript@5.1.6)):
     dependencies:
       '@eslint/config-helpers': 0.4.2
       '@eslint/js': 9.39.2
@@ -4763,7 +4758,7 @@ snapshots:
       eslint-plugin-no-unsanitized: 4.1.5(eslint@9.39.2)
       eslint-plugin-security: 2.1.1
       globals: 14.0.0
-      obsidian: 1.13.1(@codemirror/state@6.4.1)(@codemirror/view@6.26.3)
+      obsidian: 1.8.7(@codemirror/state@6.4.1)(@codemirror/view@6.26.3)
       semver: 7.8.5
       typescript: 5.4.5
       typescript-eslint: 8.52.0(eslint@9.39.2)(typescript@5.1.6)
@@ -5994,7 +5989,7 @@ snapshots:
       define-properties: 1.2.1
       es-object-atoms: 1.1.2
 
-  obsidian@1.13.1(@codemirror/state@6.4.1)(@codemirror/view@6.26.3):
+  obsidian@1.8.7(@codemirror/state@6.4.1)(@codemirror/view@6.26.3):
     dependencies:
       '@codemirror/state': 6.4.1
       '@codemirror/view': 6.26.3

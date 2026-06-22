@@ -14,7 +14,7 @@ export class BarcodeScannerModal extends Modal {
     super(app);
   }
 
-  async onOpen() {
+  onOpen() {
     const { contentEl } = this;
     this.modalEl.addClass("book-search-barcode-modal");
 
@@ -49,6 +49,10 @@ export class BarcodeScannerModal extends Modal {
       .setButtonText("Cancel")
       .onClick(() => this.close());
 
+    void this.initScanner();
+  }
+
+  private async initScanner(): Promise<void> {
     try {
       this.cameras = await Html5Qrcode.getCameras();
       if (this.cameras && this.cameras.length > 0) {
@@ -62,14 +66,14 @@ export class BarcodeScannerModal extends Modal {
 
         await this.startScanning();
       } else {
-        contentEl.createEl("p", {
+        this.contentEl.createEl("p", {
           text: "No cameras detected on this device.",
           cls: "error-message",
         });
       }
     } catch (err) {
       console.error("Camera error:", err);
-      contentEl.createEl("p", {
+      this.contentEl.createEl("p", {
         text: "Camera access denied. Please check permissions.",
         cls: "error-message",
       });

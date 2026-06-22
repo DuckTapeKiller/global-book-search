@@ -32,7 +32,7 @@ export class CalibreBrowseModal extends Modal {
     super(app);
   }
 
-  async onOpen(): Promise<void> {
+  onOpen(): void {
     const { contentEl, modalEl } = this;
     modalEl.addClass("calibre-browse-modal");
 
@@ -71,7 +71,7 @@ export class CalibreBrowseModal extends Modal {
     });
 
     // Load library info
-    await this.loadLibraryInfo();
+    void this.loadLibraryInfo();
   }
 
   private createTab(
