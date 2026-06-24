@@ -62,3 +62,63 @@ describe("util.js", () => {
     );
   });
 });
+
+describe("replaceVariableSyntax modifiers", () => {
+  const coverBook: Book = {
+    title: "Foo",
+    author: "Bar",
+    authors: ["Bar"],
+    coverUrl: "https://example.com/foo bar.jpg",
+    link: "https://example.com",
+    localCoverImage: "[[images/foo bar.png]]",
+  };
+
+  it("leaves {{localCoverImage}} unchanged (backward compatible)", () => {
+    expect(utils.replaceVariableSyntax(coverBook, "{{localCoverImage}}")).toBe(
+      "[[images/foo bar.png]]",
+    );
+  });
+
+  it("raw strips the [[ ]] wikilink brackets", () => {
+    expect(
+      utils.replaceVariableSyntax(coverBook, "{{localCoverImage:raw}}"),
+    ).toBe("images/foo bar.png");
+  });
+
+  it("url encodes spaces while preserving structure", () => {
+    expect(utils.replaceVariableSyntax(coverBook, "{{coverUrl:url}}")).toBe(
+      "https://example.com/foo%20bar.jpg",
+    );
+  });
+
+  it("chains raw then url", () => {
+    expect(
+      utils.replaceVariableSyntax(coverBook, "{{localCoverImage:raw:url}}"),
+    ).toBe("images/foo%20bar.png");
+  });
+
+  it("works inside an embed and a quoted frontmatter value", () => {
+    expect(
+      utils.replaceVariableSyntax(
+        coverBook,
+        "![[{{localCoverImage:raw}}|150]]",
+      ),
+    ).toBe("![[images/foo bar.png|150]]");
+    expect(
+      utils.replaceVariableSyntax(coverBook, '"{{localCoverImage:raw:url}}"'),
+    ).toBe('"images/foo%20bar.png"');
+  });
+
+  it("ignores unknown modifiers, returning the plain value", () => {
+    expect(utils.replaceVariableSyntax(coverBook, "{{title:bogus}}")).toBe(
+      "Foo",
+    );
+  });
+
+  it("raw leaves a non-bracketed value untouched (remote-mode cover)", () => {
+    const remote = { ...coverBook, localCoverImage: "https://x.com/c.jpg" };
+    expect(utils.replaceVariableSyntax(remote, "{{localCoverImage:raw}}")).toBe(
+      "https://x.com/c.jpg",
+    );
+  });
+});

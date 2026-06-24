@@ -134,8 +134,23 @@ The plugin will automatically convert this into a proper YAML list format upon n
 - `{{asin}}`: Amazon identification number.
 - `{{link}}`: Direct link to the source book page.
 - `{{categories}}`: List of genres and categories.
-- `{{localCoverImage}}`: Path to the locally saved cover file.
+- `{{localCoverImage}}`: Locally saved cover. In **Local** cover mode this is a `[[wikilink]]`; in **Remote** mode it is the image URL.
+- `{{coverUrl}}`: Remote URL of the cover image (available regardless of cover mode).
 - `{{tags}}`: Automated `author/name` and `libros/title` tags.
+
+### Modifiers
+
+Append `:modifier` to any variable to transform its output. Modifiers can be chained left-to-right:
+
+- `:raw` — strip surrounding `[[ ]]` wikilink brackets, leaving the bare path.
+- `:url` — URL-encode the value (spaces become `%20`), preserving `/` and `:` so it works for both vault paths and URLs.
+
+```
+Cover: "{{localCoverImage:raw:url}}"   →  Cover: "images/foo%20bar.png"
+![[{{localCoverImage:raw}}|150]]       →  ![[images/foo bar.png|150]]
+```
+
+Variables without a modifier are unchanged, so existing templates keep working exactly as before.
 
 ---
 

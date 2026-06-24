@@ -87,6 +87,34 @@ export function applyDefaultFrontMatter(
   return result;
 }
 
+/** Strip a wikilink wrapper: `[[path]]` or `[[path|alias]]` → `path`. */
+function stripWikiBrackets(value: string): string {
+  const match = value.match(/^\s*!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*$/);
+  return match ? match[1] : value;
+}
+
+/**
+ * Apply chained template modifiers to a substituted value (e.g. "raw:url"):
+ * - `raw`: strip surrounding `[[ ]]` wikilink brackets, leaving the bare path
+ * - `url`: URL-encode (spaces → %20) while preserving path/URL structure
+ * Unknown modifiers are ignored.
+ */
+function applyTemplateModifiers(value: string, modifiers?: string): string {
+  if (!modifiers) return value;
+  let result = value;
+  for (const modifier of modifiers
+    .split(":")
+    .map((m) => m.trim().toLowerCase())
+    .filter(Boolean)) {
+    if (modifier === "raw") {
+      result = stripWikiBrackets(result);
+    } else if (modifier === "url") {
+      result = encodeURI(result);
+    }
+  }
+  return result;
+}
+
 export function replaceVariableSyntax(book: Book, text: string): string {
   if (!text?.trim()) {
     return "";
@@ -94,29 +122,36 @@ export function replaceVariableSyntax(book: Book, text: string): string {
 
   const entries = Object.entries(book) as [string, unknown][];
 
-  return entries
-    .reduce((result, [key, val]) => {
-      if (Array.isArray(val)) {
-        // Check if the variable is wrapped in quotes in the template: "{{key}}"
-        const quotedRegex = new RegExp(`(['"]){{${key}}}(['"])`, "ig");
-        if (quotedRegex.test(result)) {
-          const commaString = val
-            .map((v) => stringifyValue(v).trim())
-            .join(", ");
-          return result.replace(quotedRegex, `$1${commaString}$2`);
+  return (
+    entries
+      .reduce((result, [key, val]) => {
+        if (Array.isArray(val)) {
+          // Check if the variable is wrapped in quotes in the template: "{{key}}"
+          const quotedRegex = new RegExp(`(['"]){{${key}}}(['"])`, "ig");
+          if (quotedRegex.test(result)) {
+            const commaString = val
+              .map((v) => stringifyValue(v).trim())
+              .join(", ");
+            return result.replace(quotedRegex, `$1${commaString}$2`);
+          }
+          const listString = val
+            .map((v) => `\n  - ${stringifyValue(v)}`)
+            .join("");
+          return result.replace(new RegExp(`{{${key}}}`, "ig"), listString);
         }
-        const listString = val
-          .map((v) => `\n  - ${stringifyValue(v)}`)
-          .join("");
-        return result.replace(new RegExp(`{{${key}}}`, "ig"), listString);
-      }
-      return result.replace(
-        new RegExp(`{{${key}}}`, "ig"),
-        stringifyValue(val),
-      );
-    }, text)
-    .replace(/{{\w+}}/gi, "")
-    .trim();
+        // Scalar values support optional chained modifiers: {{key:raw}},
+        // {{key:url}}, {{key:raw:url}}.
+        const value = stringifyValue(val);
+        return result.replace(
+          new RegExp(`{{${key}(?::([a-zA-Z][a-zA-Z:]*))?}}`, "ig"),
+          (_match: string, modifiers: string | undefined) =>
+            applyTemplateModifiers(value, modifiers),
+        );
+      }, text)
+      // Strip any leftover unmatched variables (with or without modifiers).
+      .replace(/{{\w+(?::[\w:]+)?}}/gi, "")
+      .trim()
+  );
 }
 
 export function camelToSnakeCase(str: string): string {

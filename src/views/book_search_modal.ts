@@ -63,19 +63,23 @@ export class BookSearchModal extends Modal {
         this.query,
         this.options,
       );
-      if (!searchResults?.length)
-        return void new Notice(`No results found for "${this.query}"`);
+      if (!searchResults?.length) {
+        // Keep the modal open so the user can retry with different terms.
+        new Notice(`No results found for "${this.query}"`);
+        return;
+      }
 
       // Save to search history on success
       this.plugin.addToSearchHistory(this.query);
 
       this.isSuccess = true;
       this.callback(null, searchResults);
+      this.close();
     } catch (err) {
       this.callback(err as Error);
+      this.close();
     } finally {
       this.setBusy(false);
-      this.close();
     }
   }
 

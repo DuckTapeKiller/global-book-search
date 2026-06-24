@@ -27,11 +27,24 @@ export function mergeBookData(base: Partial<Book>, extracted: Book): Book {
 
 const GOODREADS_HOST = "https://www.goodreads.com";
 
-// Locale-prefixed paths (`/es/book/show/<id>`) currently dodge the AWS WAF rule
-// that blocks the canonical path. Kept short on purpose: the sticky-last-good
-// tracker means we normally only hit one route, and we only fan out when a tier
-// breaks. Add more here if Goodreads ever blocks these.
-const GOODREADS_LOCALES = ["en", "es", "de"];
+// Locale-prefixed paths (`/es/book/show/<id>`) dodge the AWS WAF rule that
+// blocks the canonical path, and all return the *same* English book data — the
+// prefix only localises UI chrome, not the apolloState payload (verified across
+// en/de/ja/ru). The sticky-last-good tracker means we normally hit just one
+// route; this wider pool only fans out as a fallback when routes get blocked.
+const GOODREADS_LOCALES = [
+  "en",
+  "es",
+  "de",
+  "fr",
+  "it",
+  "pt",
+  "nl",
+  "ja",
+  "zh",
+  "ru",
+  "ko",
+];
 
 export interface GoodreadsRoute {
   kind: string;
