@@ -1,10 +1,10 @@
 {
-    "id": "global-book-search",
-    "name": "Global Book Search",
-    "version": "2.0.4",
-    "minAppVersion": "1.4.10",
-    "description": "Search for books in Google Books, Goodreads, Open Library and local Calibre libraries to create notes.",
-    "author": "DuckTapeKiller",
-    "authorUrl": "https://github.com/DuckTapeKiller",
-    "isDesktopOnly": false
+  "id": "global-book-search",
+  "name": "Global Book Search",
+  "version": "2.0.5",
+  "minAppVersion": "1.4.10",
+  "description": "Search for books in Google Books, Goodreads, Open Library and local Calibre libraries to create notes.",
+  "author": "DuckTapeKiller",
+  "authorUrl": "https://github.com/DuckTapeKiller",
+  "isDesktopOnly": false
 }

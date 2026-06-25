@@ -152,6 +152,32 @@ Cover: "{{localCoverImage:raw:url}}"   →  Cover: "images/foo%20bar.png"
 
 Variables without a modifier are unchanged, so existing templates keep working exactly as before.
 
+### LibraryThing "Common Knowledge" variables
+
+The **LibraryThing** provider exposes extra literary metadata from a book's "Common Knowledge". These are **not** in the default frontmatter template — add the ones you want to your own template (they fill in only when LibraryThing has the data, and are empty for other providers):
+
+- `{{characters}}` — main characters (e.g. `Frederic Henry; Catherine Barkley`)
+- `{{places}}` — important places
+- `{{events}}` — important events
+- `{{firstWords}}` — opening line(s)
+- `{{lastWords}}` — closing line(s)
+- `{{quotes}}` — notable epigraph/quotes
+- `{{dedication}}` — dedication
+- `{{blurbers}}` — blurbers
+- `{{relatedMovies}}` — related film adaptations
+- `{{originalLanguage}}` — original language
+
+Example template additions:
+
+```
+Characters: "{{characters}}"
+Places: "{{places}}"
+First words: "{{firstWords}}"
+Original language: {{originalLanguage}}
+```
+
+> Note: LibraryThing is behind Cloudflare's bot protection. The provider works only if your client can reach the site; it degrades gracefully (no results) otherwise.
+
 ---
 
 ## [i] Duplicate Detection

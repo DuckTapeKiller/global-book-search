@@ -30,6 +30,19 @@ export interface Book {
   tags?: string[];
   localCoverImage?: string;
 
+  // LibraryThing "Common Knowledge" fields. Available as template variables
+  // (e.g. {{characters}}); not part of the default frontmatter template.
+  characters?: string;
+  places?: string;
+  events?: string;
+  firstWords?: string;
+  lastWords?: string;
+  quotes?: string;
+  dedication?: string;
+  blurbers?: string;
+  originalLanguage?: string;
+  relatedMovies?: string;
+
   // Calibre-specific
   series?: string;
   seriesNumber?: number | string;

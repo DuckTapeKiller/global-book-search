@@ -232,6 +232,10 @@ export async function globalSearch(
   if (options?.includeCalibre && settings.calibreServerUrl) {
     providers.push("calibre");
   }
+  // Hardcover self-skips (returns nothing) until an API token is configured,
+  // but it stays listed so it appears alongside the other sources.
+  providers.push("hardcover");
+  providers.push("librarything");
 
   onProgress?.("Searching all sources...");
 
@@ -387,34 +391,51 @@ export async function enrichBookByISBN(
   // ── Step 2: Extract ISBN ───────────────────────────────────────────────────
   let isbn = book.isbn13 || book.isbn10;
 
-  // ── FALLBACK: If no ISBN, search Goodreads by Title/Author to find it ──────
-  if (!isbn && primarySourceId !== "goodreads") {
-    onProgress?.("No ISBN — searching Goodreads by title...");
-    try {
-      const grApi = new GoodreadsApi();
-      const grResults = await Promise.race([
-        grApi.getByQuery(`${book.title} ${book.author}`),
-        timeoutReject<Book[]>(8000, "goodreads-title-fallback"),
-      ]);
+  // ── FALLBACK: If no ISBN, discover one by searching ANY provider by ─────────
+  // title/author. Tried in order until one yields an ISBN, so no single source
+  // (Goodreads) being down can break the chain.
+  if (!isbn) {
+    const discoveryOrder = [
+      "goodreads",
+      "openlibrary",
+      "google",
+      "hardcover",
+      "librarything",
+    ]
+      .filter((id) => id !== primarySourceId)
+      .filter((id) => id !== "hardcover" || settings.hardcoverApiToken)
+      .filter((id) => id !== "librarything" || settings.librarythingApiKey);
 
-      if (grResults.length > 0) {
-        // Use the first result as the most likely match
-        const grFull = await Promise.race([
-          grApi.getBook(grResults[0]),
-          timeoutReject<Book>(8000, "goodreads-title-fallback-book"),
+    for (const id of discoveryOrder) {
+      const label = GLOBAL_SEARCH_SOURCE_LABELS[id] || id;
+      onProgress?.(`No ISBN — searching ${label} by title...`);
+      try {
+        const api = factoryServiceProvider(settings, id);
+        const results = await Promise.race([
+          api.getByQuery(`${book.title} ${book.author}`),
+          timeoutReject<Book[]>(8000, `${id}-title-fallback`),
         ]);
-        const grIsbn = grFull.isbn13 || grFull.isbn10;
-        if (grIsbn) {
-          isbn = grIsbn;
-          goodreadsData = grFull;
-          // Update the base book object so it carries the ISBN forward
-          book.isbn13 = grFull.isbn13;
-          book.isbn10 = grFull.isbn10;
-          onProgress?.("ISBN found on Goodreads ✓");
+        if (results.length === 0) continue;
+        // Use the first result as the most likely match.
+        const full = api.getBook
+          ? await Promise.race([
+              api.getBook(results[0]),
+              timeoutReject<Book>(12000, `${id}-title-fallback-book`),
+            ])
+          : results[0];
+        const foundIsbn = full.isbn13 || full.isbn10;
+        if (foundIsbn) {
+          isbn = foundIsbn;
+          book.isbn13 = full.isbn13 || book.isbn13;
+          book.isbn10 = full.isbn10 || book.isbn10;
+          // Reuse Goodreads' data downstream; others get re-queried by ISBN.
+          if (id === "goodreads") goodreadsData = full;
+          onProgress?.(`ISBN found on ${label} ✓`);
+          break;
         }
+      } catch (err) {
+        console.warn(`ISBN discovery via ${id} failed`, err);
       }
-    } catch (err) {
-      console.warn("Goodreads title fallback failed", err);
     }
   }
 
@@ -456,12 +477,16 @@ export async function enrichBookByISBN(
   // ── Step 4: Secondary sources in parallel ─────────────────────────────────
   onProgress?.("Enriching from secondary sources...");
 
-  const secondaryProviderIds = ["google", "storygraph", "openlibrary"].filter(
+  const secondaryProviderIds = ["google", "storygraph", "openlibrary"];
+  // Hardcover + LibraryThing join the ISBN chain when configured.
+  if (settings.hardcoverApiToken) secondaryProviderIds.push("hardcover");
+  if (settings.librarythingApiKey) secondaryProviderIds.push("librarything");
+  const activeSecondaryProviderIds = secondaryProviderIds.filter(
     (id) => !sourceIds.includes(id),
   );
 
   const secondaryResultsWithIds = await Promise.allSettled(
-    secondaryProviderIds.map(
+    activeSecondaryProviderIds.map(
       async (id): Promise<{ book: Book; providerId: string } | null> => {
         try {
           if (id === "google") {
@@ -502,6 +527,25 @@ export async function enrichBookByISBN(
               timeoutReject<Book[]>(8000, id),
             ]);
             return results[0] ? { book: results[0], providerId: id } : null;
+          }
+
+          if (id === "hardcover" || id === "librarything") {
+            // Use the factory so locale + token resolution are applied. These
+            // cluster editions by work, so the localised edition's ISBN may
+            // differ from the query ISBN — don't drop on a mismatch.
+            const api = factoryServiceProvider(settings, id);
+            const results = await Promise.race([
+              api.getByQuery(isbn),
+              timeoutReject<Book[]>(8000, id),
+            ]);
+            if (results.length === 0) return null;
+            const full = api.getBook
+              ? await Promise.race([
+                  api.getBook(results[0]),
+                  timeoutReject<Book>(12000, `${id}-getBook`),
+                ])
+              : results[0];
+            return { book: full, providerId: id };
           }
 
           return null;

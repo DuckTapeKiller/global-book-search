@@ -12,6 +12,15 @@ describe("util.js", () => {
     link: "http://example.com/book",
   };
 
+  it("toStringFrontMatter renders arrays as flush YAML block sequences", () => {
+    expect(
+      utils.toStringFrontMatter({ tags: ["introducing_kafka"] }),
+    ).toContain("tags:\n- introducing_kafka");
+    expect(
+      utils.toStringFrontMatter({ tags: ["author/kafka", "libros/x"] }),
+    ).toContain("tags:\n- author/kafka\n- libros/x");
+  });
+
   it("replaceIllegalFileNameCharactersInString 1", () => {
     expect(
       utils.replaceIllegalFileNameCharactersInString(

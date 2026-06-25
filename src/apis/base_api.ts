@@ -7,6 +7,8 @@ import { GoodreadsApi } from "./goodreads_api";
 import { CalibreApi } from "./calibre_api";
 import { OpenLibraryApi } from "./open_library_api";
 import { StoryGraphApi } from "./storygraph_api";
+import { HardcoverApi } from "./hardcover_api";
+import { LibraryThingApi } from "./librarything_api";
 
 export interface BaseBooksApiImpl {
   getByQuery(query: string, options?: Record<string, string>): Promise<Book[]>;
@@ -39,8 +41,29 @@ export function factoryServiceProvider(
       return new OpenLibraryApi();
     case ServiceProvider.storygraph:
       return new StoryGraphApi();
+    case ServiceProvider.hardcover:
+      return new HardcoverApi(
+        settings.hardcoverApiToken,
+        resolveLocale(settings.localePreference),
+      );
+    case ServiceProvider.librarything:
+      return new LibraryThingApi(
+        settings.librarythingApiKey,
+        resolveLocale(settings.localePreference),
+      );
     default:
       throw new Error("Unsupported service provider.");
+  }
+}
+
+// The reader's language: an explicit preference if set, otherwise Obsidian's
+// own UI/moment locale (so a Spanish Obsidian gets Spanish editions by default).
+function resolveLocale(preference: string): string {
+  if (preference && preference !== "default") return preference;
+  try {
+    return window.moment.locale() || "en";
+  } catch {
+    return "en";
   }
 }
 

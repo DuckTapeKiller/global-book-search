@@ -1,4 +1,4 @@
-import { BaseBooksApiImpl, factoryServiceProvider } from "@apis/base_api";
+import { factoryServiceProvider } from "@apis/base_api";
 import { Book } from "@models/book.model";
 import { DEFAULT_SETTINGS } from "@settings/settings";
 import { ServiceProvider } from "@src/constants";
@@ -21,7 +21,6 @@ export class BookSearchModal extends Modal {
   private isBusy = false;
   private isSuccess = false;
   private okBtnRef?: ButtonComponent;
-  private serviceProvider: BaseBooksApiImpl;
   private options: { locale: string };
   private searchInput?: TextComponent;
 
@@ -33,10 +32,6 @@ export class BookSearchModal extends Modal {
   ) {
     super(plugin.app);
     this.options = { locale: plugin.settings.localePreference };
-    this.serviceProvider = factoryServiceProvider(
-      plugin.settings,
-      serviceProviderId,
-    );
   }
 
   setBusy(busy: boolean): void {
@@ -59,7 +54,12 @@ export class BookSearchModal extends Modal {
 
     this.setBusy(true);
     try {
-      const searchResults = await this.serviceProvider.getByQuery(
+      const settings = await this.plugin.resolveProviderSettings();
+      const serviceProvider = factoryServiceProvider(
+        settings,
+        this.serviceProviderId,
+      );
+      const searchResults = await serviceProvider.getByQuery(
         this.query,
         this.options,
       );
@@ -117,9 +117,6 @@ export class BookSearchModal extends Modal {
       this.renderSelectLocale();
 
     const searchSetting = new Setting(contentEl);
-    if (!Platform.isMobile) {
-      searchSetting.setName("Search").setDesc("Search by keyword or ISBN");
-    }
 
     searchSetting.addText((text) => {
       this.searchInput = text;

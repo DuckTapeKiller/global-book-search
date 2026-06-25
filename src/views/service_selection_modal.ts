@@ -107,6 +107,8 @@ export class ServiceSelectionModal extends Modal {
         { label: "OpenLibrary", value: "openlibrary" },
         { label: "StoryGraph", value: "storygraph" },
         { label: "Google Books", value: "google" },
+        { label: "LibraryThing", value: "librarything" },
+        { label: "Hardcover", value: "hardcover" },
       ];
 
       services.forEach((service) => {

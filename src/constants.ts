@@ -4,6 +4,8 @@ export enum ServiceProvider {
   calibre = "calibre",
   openlibrary = "openlibrary",
   storygraph = "storygraph",
+  hardcover = "hardcover",
+  librarything = "librarything",
 }
 
 export const GLOBAL_SEARCH_SOURCE_LABELS: Record<string, string> = {
@@ -12,6 +14,8 @@ export const GLOBAL_SEARCH_SOURCE_LABELS: Record<string, string> = {
   openlibrary: "OpenLibrary",
   storygraph: "StoryGraph",
   calibre: "Calibre",
+  hardcover: "Hardcover",
+  librarything: "LibraryThing",
   fable: "Fable",
   loc: "Library of Congress",
 };

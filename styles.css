@@ -878,6 +878,18 @@ body.is-mobile .modal.calibre-browse-modal {
   border: none;
 }
 
+.book-source-badge--hardcover {
+  background: linear-gradient(135deg, #e0457b 0%, #a83258 100%);
+  color: #ffffff;
+  border: none;
+}
+
+.book-source-badge--librarything {
+  background: linear-gradient(135deg, #0e7490 0%, #0c4a6e 100%);
+  color: #ffffff;
+  border: none;
+}
+
 /* =============================================
    Global Search button in service modal
    ============================================= */

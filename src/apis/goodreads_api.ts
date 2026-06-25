@@ -812,24 +812,10 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     const detail = await this.fetchDetail(book);
     let result = detail ? mergeBookData(book, detail) : { ...book };
 
-    // Tier 5: top up still-missing core fields from independent sources. Only
-    // fires when a tier above couldn't supply them, so successful Goodreads
-    // fetches don't pay for redundant network calls.
-    const missingCore =
-      !result.publisher ||
-      (!result.isbn13 && !result.isbn10) ||
-      !result.categories;
-    if (missingCore) {
-      try {
-        const cross = await this.fetchCrossSource(result);
-        if (cross) {
-          // result (Goodreads) wins where present; cross-source fills the gaps.
-          result = mergeBookData(cross, result);
-        }
-      } catch (error) {
-        console.warn("Goodreads cross-source enrichment failed", error);
-      }
-    }
+    // A single-service search returns ONLY Goodreads data. Cross-source
+    // enrichment from other providers (Google Books / OpenLibrary) is the job
+    // of Global Search — doing it here made individual searches slow whenever
+    // another service was unreachable, and leaked other sources into the result.
 
     // Always present the canonical reader-facing link, not an .xml/archive URL.
     if (canonicalLink) {
@@ -1035,143 +1021,6 @@ export class GoodreadsApi implements BaseBooksApiImpl {
   }
 
   /** Tier 5: fill missing fields from sources that don't block scraping. */
-  private async fetchCrossSource(book: Book): Promise<Partial<Book> | null> {
-    const title = (book.title || "").trim();
-    if (!title) return null;
-    const author = (book.author || book.authors?.[0] || "").trim();
-    const isbn = book.isbn13 || book.isbn10 || "";
-
-    const google = await this.fetchGoogleBooks(
-      isbn ? `isbn:${isbn}` : `${title} ${author}`.trim(),
-    );
-    if (google && (google.publisher || google.isbn13 || google.categories)) {
-      return google;
-    }
-
-    const openLibrary = await this.fetchOpenLibrary(title, author);
-    return openLibrary;
-  }
-
-  private async fetchGoogleBooks(query: string): Promise<Partial<Book> | null> {
-    try {
-      const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=5&printType=books`;
-      const res = await httpRequest(
-        { url, method: "GET", headers: { Accept: "application/json" } },
-        {
-          providerId: "google",
-          purpose: "goodreads-crosssource",
-          responseType: "json",
-          cacheTtlMs: 600_000,
-        },
-      );
-      const items = this.getPath(res.json, ["items"]);
-      if (!Array.isArray(items)) return null;
-
-      for (const item of items) {
-        const vi = this.getPath(item, ["volumeInfo"]);
-        if (!this.isRecord(vi)) continue;
-
-        let isbn13 = "";
-        let isbn10 = "";
-        const ids = vi["industryIdentifiers"];
-        if (Array.isArray(ids)) {
-          for (const idObj of ids) {
-            const type = this.asString(this.getPath(idObj, ["type"]));
-            const value = digitsOnly(this.getPath(idObj, ["identifier"]));
-            if (type === "ISBN_13" && value.length === 13) isbn13 = value;
-            if (type === "ISBN_10" && value.length === 10) isbn10 = value;
-          }
-        }
-        const cats = vi["categories"];
-        const categories = Array.isArray(cats) ? cats.join(", ") : "";
-        const pageCount = this.asNumber(vi["pageCount"]);
-
-        const out: Partial<Book> = {
-          publisher: this.asString(vi["publisher"]),
-          publishDate: this.asString(vi["publishedDate"]),
-          totalPage: pageCount ? String(pageCount) : "",
-          categories,
-          category: categories,
-          isbn13,
-          isbn10,
-          description: this.stripHtml(this.asString(vi["description"])),
-        };
-        if (out.publisher || out.isbn13 || out.categories || out.totalPage) {
-          return out;
-        }
-      }
-      return null;
-    } catch (error) {
-      console.warn("Goodreads cross-source (Google Books) failed", error);
-      return null;
-    }
-  }
-
-  private async fetchOpenLibrary(
-    title: string,
-    author: string,
-  ): Promise<Partial<Book> | null> {
-    try {
-      const url =
-        `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}` +
-        (author ? `&author=${encodeURIComponent(author)}` : "") +
-        "&limit=1&fields=isbn,publisher,number_of_pages_median,subject";
-      const res = await httpRequest(
-        { url, method: "GET", headers: { Accept: "application/json" } },
-        {
-          providerId: "openlibrary",
-          purpose: "goodreads-crosssource",
-          responseType: "json",
-          cacheTtlMs: 600_000,
-        },
-      );
-      const docs = this.getPath(res.json, ["docs"]);
-      if (!Array.isArray(docs) || docs.length === 0) return null;
-      const doc: unknown = (docs as unknown[])[0];
-
-      let isbn13 = "";
-      let isbn10 = "";
-      const isbns = this.getPath(doc, ["isbn"]);
-      if (Array.isArray(isbns)) {
-        for (const raw of isbns) {
-          const value = digitsOnly(raw);
-          if (value.length === 13 && !isbn13) isbn13 = value;
-          if (value.length === 10 && !isbn10) isbn10 = value;
-        }
-      }
-      const publishers = this.getPath(doc, ["publisher"]);
-      const subjects = this.getPath(doc, ["subject"]);
-      const pages = this.asNumber(
-        this.getPath(doc, ["number_of_pages_median"]),
-      );
-      const categories = Array.isArray(subjects)
-        ? subjects
-            .slice(0, 4)
-            .map((s) => this.asString(s))
-            .filter(Boolean)
-            .join(", ")
-        : "";
-
-      const out: Partial<Book> = {
-        publisher: Array.isArray(publishers)
-          ? this.asString(publishers[0])
-          : "",
-        totalPage: pages ? String(pages) : "",
-        categories,
-        category: categories,
-        isbn13,
-        isbn10,
-      };
-      if (out.publisher || out.categories || out.isbn13 || out.totalPage) {
-        return out;
-      }
-      return null;
-    } catch (error) {
-      console.warn("Goodreads cross-source (Open Library) failed", error);
-      return null;
-    }
-  }
-
   private warnDetailPageBlocked(status?: number): void {
     console.warn(
       `Goodreads: book page blocked or unparseable (HTTP ${status ?? "?"}, scraper ${GoodreadsApi.SCRAPER_VERSION}); falling back to search-result data.`,

@@ -55,6 +55,8 @@ export class GlobalSearchModal extends Modal {
         { label: "Google Books", id: "google" },
         { label: "OpenLibrary", id: "openlibrary" },
         { label: "StoryGraph", id: "storygraph" },
+        { label: "LibraryThing", id: "librarything" },
+        { label: "Hardcover", id: "hardcover" },
       ];
 
       providers.forEach((p, index) => {
@@ -67,11 +69,6 @@ export class GlobalSearchModal extends Modal {
     }
 
     const searchSetting = new Setting(contentEl);
-    if (!Platform.isMobile) {
-      searchSetting
-        .setName("Search")
-        .setDesc("Search by title, author, or ISBN");
-    }
 
     searchSetting.addText((text) => {
       const parentEl = text.inputEl.parentElement;
@@ -136,11 +133,12 @@ export class GlobalSearchModal extends Modal {
     searchButton.disabled = true;
 
     try {
+      const settings = await this.plugin.resolveProviderSettings();
       const results = await globalSearch(
         this.query,
-        this.plugin.settings,
+        settings,
         {
-          locale: this.plugin.settings.localePreference,
+          locale: settings.localePreference,
           vaultIndex: this.plugin.getVaultIndex(),
         },
         (msg) => {

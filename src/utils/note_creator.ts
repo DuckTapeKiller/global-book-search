@@ -154,7 +154,18 @@ export class BookNoteCreator {
     const resolvedFrontmatter: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(formattedFrontmatter)) {
       if (typeof value === "string") {
-        resolvedFrontmatter[key] = replaceVariableSyntax(book, value);
+        // A value that is exactly one array variable (e.g. "{{tags}}", unquoted)
+        // must keep its array shape so it serialises as a YAML block sequence
+        // instead of being flattened into an invalid inline string.
+        const single = value.trim().match(/^{{(\w+)}}$/);
+        const bookField = single
+          ? (book as unknown as Record<string, unknown>)[single[1]]
+          : undefined;
+        if (Array.isArray(bookField)) {
+          resolvedFrontmatter[key] = bookField;
+        } else {
+          resolvedFrontmatter[key] = replaceVariableSyntax(book, value);
+        }
       } else if (Array.isArray(value)) {
         resolvedFrontmatter[key] = (value as unknown[]).map((v) =>
           typeof v === "string" ? replaceVariableSyntax(book, v) : v,

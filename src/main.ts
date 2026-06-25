@@ -1,6 +1,8 @@
 import { MarkdownView, Notice, Plugin, TFile } from "obsidian";
 import { factoryServiceProvider } from "@apis/base_api";
 import { CalibreApi } from "@apis/calibre_api";
+import { probeLibraryThing } from "@apis/librarything_api";
+import { probeHardcover } from "@apis/hardcover_api";
 
 import { BookSearchModal } from "@views/book_search_modal";
 import { BookSuggestModal } from "@views/book_suggest_modal";
@@ -34,6 +36,7 @@ import {
 } from "@apis/global_search";
 import { VaultIndexEntry, BookEdition } from "@models/accuracy.model";
 import { configureHttp } from "@utils/http";
+import { resolveSecret } from "@utils/secrets";
 import { asRecord } from "@utils/json";
 import { loadHistory, serializeHistory } from "@utils/provider_history";
 
@@ -149,6 +152,58 @@ export default class BookSearchPlugin extends Plugin {
         void this.createNewBookNote("storygraph").catch((err) =>
           console.warn(err),
         );
+      },
+    });
+
+    this.addCommand({
+      id: "search-hardcover",
+      name: "Search Hardcover",
+      callback: () => {
+        void this.createNewBookNote("hardcover").catch((err) =>
+          console.warn(err),
+        );
+      },
+    });
+
+    this.addCommand({
+      id: "search-librarything",
+      name: "Search LibraryThing",
+      callback: () => {
+        void this.createNewBookNote("librarything").catch((err) =>
+          console.warn(err),
+        );
+      },
+    });
+
+    this.addCommand({
+      id: "test-librarything-connectivity",
+      name: "Test LibraryThing connectivity",
+      callback: () => {
+        void (async () => {
+          new Notice("Testing LibraryThing connectivity…");
+          const key = await resolveSecret(
+            this.app,
+            this.settings.librarythingApiKey,
+          );
+          const report = await probeLibraryThing(key);
+          new Notice("LibraryThing connectivity:\n" + report, 60000);
+        })();
+      },
+    });
+
+    this.addCommand({
+      id: "test-hardcover-connectivity",
+      name: "Test Hardcover connectivity",
+      callback: () => {
+        void (async () => {
+          new Notice("Testing Hardcover API…");
+          const token = await resolveSecret(
+            this.app,
+            this.settings.hardcoverApiToken,
+          );
+          const report = await probeHardcover(token);
+          new Notice("Hardcover API:\n" + report, 60000);
+        })();
       },
     });
 
@@ -279,12 +334,35 @@ export default class BookSearchPlugin extends Plugin {
     const book = await this.openBookSuggestModal(searchedBooks);
 
     // Enrich book with full details if provider supports it
-    const api = factoryServiceProvider(this.settings, serviceProvider);
+    const settings = await this.resolveProviderSettings();
+    const api = factoryServiceProvider(settings, serviceProvider);
 
-    if (api.getBook) {
+    if (!api.getBook) return book;
+
+    // Show progress while fetching details (this is a network step and can take
+    // a few seconds — never leave the user staring at nothing).
+    const label = serviceProvider || settings.serviceProvider || "the source";
+    const progressModal = new EnrichmentProgressModal(this.app);
+    progressModal.open();
+    progressModal.setStatus(
+      `Fetching details from ${label.charAt(0).toUpperCase() + label.slice(1)}…`,
+    );
+    try {
       return await api.getBook(book);
+    } finally {
+      progressModal.close();
     }
-    return book;
+  }
+
+  // Returns a settings copy with API-key fields resolved from SecretStorage to
+  // their actual values, so providers receive usable tokens regardless of
+  // whether the key is stored as a secret name or as a plain value.
+  async resolveProviderSettings(): Promise<BookSearchPluginSettings> {
+    const [hardcoverApiToken, librarythingApiKey] = await Promise.all([
+      resolveSecret(this.app, this.settings.hardcoverApiToken),
+      resolveSecret(this.app, this.settings.librarythingApiKey),
+    ]);
+    return { ...this.settings, hardcoverApiToken, librarythingApiKey };
   }
 
   async insertMetadata(): Promise<void> {
@@ -406,7 +484,7 @@ export default class BookSearchPlugin extends Plugin {
 
           const enrichmentResult = await enrichBookByISBN(
             bookWithSource,
-            this.settings,
+            await this.resolveProviderSettings(),
             (msg) => progressModal.setStatus(msg),
           );
 
@@ -735,7 +813,7 @@ export default class BookSearchPlugin extends Plugin {
         // 5. Enrich by ISBN
         const enrichmentResult = await enrichBookByISBN(
           finalTargetBook,
-          this.settings,
+          await this.resolveProviderSettings(),
           (msg) => progressModal.setStatus(msg),
         );
 
@@ -823,13 +901,17 @@ export default class BookSearchPlugin extends Plugin {
     let lastCreated: TFile | undefined;
 
     try {
+      const resolvedSettings = await this.resolveProviderSettings();
       for (let i = 0; i < isbns.length; i++) {
         const isbn = isbns[i];
         progressModal.setStatus(`(${i + 1}/${isbns.length}) ISBN ${isbn}...`);
 
         try {
-          const enrichment = await enrichFromIsbn(isbn, this.settings, (msg) =>
-            progressModal.setStatus(`(${i + 1}/${isbns.length}) ${msg}`),
+          const enrichment = await enrichFromIsbn(
+            isbn,
+            resolvedSettings,
+            (msg) =>
+              progressModal.setStatus(`(${i + 1}/${isbns.length}) ${msg}`),
           );
 
           if (skipDuplicates) {

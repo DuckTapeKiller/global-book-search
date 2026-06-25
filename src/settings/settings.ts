@@ -1,5 +1,20 @@
 import { replaceDateInString } from "@utils/utils";
-import { App, Menu, Notice, PluginSettingTab, Setting } from "obsidian";
+import {
+  App,
+  Menu,
+  Notice,
+  PluginSettingTab,
+  SecretComponent,
+  Setting,
+} from "obsidian";
+
+// SecretComponent / app.secretStorage only exist on newer Obsidian; gate on both.
+function secretStorageAvailable(app: App): boolean {
+  return (
+    typeof SecretComponent !== "undefined" &&
+    typeof app.secretStorage?.getSecret === "function"
+  );
+}
 
 import { GLOBAL_SEARCH_SOURCE_LABELS, ServiceProvider } from "@src/constants";
 import languages from "@utils/languages";
@@ -40,6 +55,8 @@ export interface BookSearchPluginSettings {
   serviceProvider: ServiceProvider;
   localePreference: string;
   apiKey: string;
+  hardcoverApiToken: string; // Hardcover personal API token (Account → API)
+  librarythingApiKey: string; // LibraryThing developer key (services API)
   openPageOnCompletion: boolean;
   showCoverImageInSearch: boolean;
   enableCoverImageEdgeCurl: boolean;
@@ -312,6 +329,8 @@ export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
   serviceProvider: ServiceProvider.google,
   localePreference: "default",
   apiKey: "",
+  hardcoverApiToken: "",
+  librarythingApiKey: "",
   openPageOnCompletion: true,
   showCoverImageInSearch: true,
   enableCoverImageEdgeCurl: true,
@@ -451,41 +470,47 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createFileNameFormatSetting(containerEl: HTMLElement) {
-    const desc = activeDocument.createDocumentFragment();
-    desc.createSpan({ text: "Enter the file name format. Example: " });
-    const newFileNameHint = desc.createEl("code", {
+    const setting = new Setting(containerEl)
+      .setClass("book-search-plugin__settings--new_file_name")
+      .setName("New file name");
+    // Built into descEl (not a detached fragment) so it renders on all Obsidian
+    // versions; setDesc(DocumentFragment) shows "[object DocumentFragment]".
+    setting.descEl.createSpan({
+      text: "Enter the file name format. Example: ",
+    });
+    const newFileNameHint = setting.descEl.createEl("code", {
       text:
         replaceDateInString(this.plugin.settings.fileNameFormat) ||
         "{{title}} - {{author}}",
     });
 
-    new Setting(containerEl)
-      .setClass("book-search-plugin__settings--new_file_name")
-      .setName("New file name")
-      .setDesc(desc)
-      .addSearch((cb) => {
-        try {
-          new FileNameFormatSuggest(this.app, cb.inputEl);
-        } catch (e) {
-          console.error(e);
-        }
-        cb.setPlaceholder("Example: {{title}} - {{author}}")
-          .setValue(this.plugin.settings.fileNameFormat)
-          .onChange((newValue) => {
-            this.plugin.settings.fileNameFormat = newValue?.trim();
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
+    setting.addSearch((cb) => {
+      try {
+        new FileNameFormatSuggest(this.app, cb.inputEl);
+      } catch (e) {
+        console.error(e);
+      }
+      cb.setPlaceholder("Example: {{title}} - {{author}}")
+        .setValue(this.plugin.settings.fileNameFormat)
+        .onChange((newValue) => {
+          this.plugin.settings.fileNameFormat = newValue?.trim();
+          void this.plugin.saveSettings().catch((err) => console.warn(err));
 
-            newFileNameHint.textContent =
-              replaceDateInString(newValue) || "{{title}} - {{author}}";
-          });
-      });
+          newFileNameHint.textContent =
+            replaceDateInString(newValue) || "{{title}} - {{author}}";
+        });
+    });
   }
 
   private createFrontmatterSetting(containerEl: HTMLElement) {
-    const desc = activeDocument.createDocumentFragment();
-    desc.createDiv({ text: "The frontmatter that is inserted into the text." });
+    const setting = new Setting(containerEl)
+      .setName("Frontmatter")
+      .setDesc("The frontmatter that is inserted into the text.");
 
-    const buttonContainer = desc.createDiv();
+    // Build the action buttons directly into the description element. Passing a
+    // detached DocumentFragment to setDesc() renders as "[object DocumentFragment]"
+    // on newer Obsidian, which previously hid these buttons (incl. Languages).
+    const buttonContainer = setting.descEl.createDiv();
     buttonContainer.addClass("book-search-plugin__settings-button-group");
 
     const restoreButton = buttonContainer.createEl("button", {
@@ -497,38 +522,43 @@ export class BookSearchSettingTab extends PluginSettingTab {
       void this.plugin.saveSettings().then(() => this.display());
     };
 
-    const languagesButton = buttonContainer.createEl("button", {
-      text: "Languages",
+    // "Language" button that opens a native, theme-adaptive Obsidian menu.
+    // setUseNativeMenu(false) forces the in-app themed menu instead of the OS menu.
+    const languageButton = buttonContainer.createEl("button", {
+      text: "Language",
     });
-    languagesButton.onclick = (event: MouseEvent) => {
+    languageButton.addEventListener("click", (event) => {
       const menu = new Menu();
+      menu.setUseNativeMenu(false);
+      const current = this.plugin.settings.frontmatter;
       Object.keys(FRONTMATTER_TEMPLATES).forEach((lang) => {
+        const template =
+          FRONTMATTER_TEMPLATES[lang as keyof typeof FRONTMATTER_TEMPLATES];
         menu.addItem((item) => {
-          item.setTitle(lang).onClick(() => {
-            this.plugin.settings.frontmatter =
-              FRONTMATTER_TEMPLATES[lang as keyof typeof FRONTMATTER_TEMPLATES];
-            void this.plugin.saveSettings().then(() => this.display());
-          });
+          item
+            .setTitle(lang)
+            .setChecked(template === current)
+            .onClick(() => {
+              this.plugin.settings.frontmatter = template;
+              void this.plugin.saveSettings().then(() => this.display());
+            });
         });
       });
       menu.showAtMouseEvent(event);
-    };
+    });
 
-    new Setting(containerEl)
-      .setName("Frontmatter")
-      .setDesc(desc)
-      .addTextArea((text) => {
-        text.inputEl.rows = 15;
-        text.inputEl.cols = 40;
-        text.inputEl.addClass("book-search-plugin__settings--textarea");
-        text
-          .setPlaceholder("Enter the frontmatter")
-          .setValue(this.plugin.settings.frontmatter)
-          .onChange((newValue) => {
-            this.plugin.settings.frontmatter = newValue;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
+    setting.addTextArea((text) => {
+      text.inputEl.rows = 15;
+      text.inputEl.cols = 40;
+      text.inputEl.addClass("book-search-plugin__settings--textarea");
+      text
+        .setPlaceholder("Enter the frontmatter")
+        .setValue(this.plugin.settings.frontmatter)
+        .onChange((newValue) => {
+          this.plugin.settings.frontmatter = newValue;
+          void this.plugin.saveSettings().catch((err) => console.warn(err));
+        });
+    });
   }
 
   private createContentSetting(containerEl: HTMLElement) {
@@ -639,6 +669,14 @@ export class BookSearchSettingTab extends PluginSettingTab {
         dropDown.addOption(
           ServiceProvider.storygraph,
           `${ServiceProvider.storygraph} (Scraping)`,
+        );
+        dropDown.addOption(
+          ServiceProvider.hardcover,
+          `${ServiceProvider.hardcover} (API token)`,
+        );
+        dropDown.addOption(
+          ServiceProvider.librarything,
+          `${ServiceProvider.librarything} (Scraping)`,
         );
         dropDown.setValue(
           this.plugin.settings?.serviceProvider ?? ServiceProvider.google,
@@ -773,7 +811,10 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createGoogleApiSettings(containerEl: HTMLElement) {
-    const googleDesc = activeDocument.createDocumentFragment();
+    const googleSetting = new Setting(containerEl).setName(
+      "Google API settings",
+    );
+    const googleDesc = googleSetting.descEl;
     googleDesc.createEl("div", {
       text: "If you get 'Request Failed, status 429', it means you have reached the daily limit of the shared API key.",
     });
@@ -785,8 +826,6 @@ export class BookSearchSettingTab extends PluginSettingTab {
       href: "https://console.cloud.google.com/apis/credentials",
     });
     googleDesc.createEl("span", { text: " and paste it below." });
-
-    new Setting(containerEl).setName("Google API settings").setDesc(googleDesc);
 
     new Setting(containerEl)
       .setName("Status check")
@@ -803,15 +842,13 @@ export class BookSearchSettingTab extends PluginSettingTab {
         });
       });
 
-    const googleAPISetDesc = activeDocument.createDocumentFragment();
-    googleAPISetDesc.createDiv({ text: "Set your Books API key." });
-    googleAPISetDesc.createDiv({
+    let tempKeyValue = "";
+    const apiKeySetting = new Setting(containerEl).setName("Set API key");
+    apiKeySetting.descEl.createDiv({ text: "Set your Books API key." });
+    apiKeySetting.descEl.createDiv({
       text: "For security reason, saved API key is not shown in this textarea after saved.",
     });
-    let tempKeyValue = "";
-    new Setting(containerEl)
-      .setName("Set API key")
-      .setDesc(googleAPISetDesc)
+    apiKeySetting
       .addText((text) => {
         text.inputEl.type = "password";
         text.setValue("").onChange((value) => {
@@ -826,6 +863,76 @@ export class BookSearchSettingTab extends PluginSettingTab {
             .then(() => new Notice("API key saved"));
         });
       });
+  }
+
+  private createHardcoverApiSettings(containerEl: HTMLElement) {
+    const setting = new Setting(containerEl).setName("Hardcover API token");
+    setting.descEl.appendText(
+      "Required to use the Hardcover provider. Get a personal token at ",
+    );
+    setting.descEl.createEl("a", {
+      text: "hardcover.app/account/api",
+      href: "https://hardcover.app/account/api",
+    });
+    setting.descEl.appendText(
+      " (Account → API). Stored securely in Obsidian's secret storage.",
+    );
+    if (secretStorageAvailable(this.app)) {
+      setting.addComponent((el) =>
+        new SecretComponent(this.app, el)
+          .setValue(this.plugin.settings.hardcoverApiToken)
+          .onChange((value) => {
+            this.plugin.settings.hardcoverApiToken = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
+    } else {
+      setting.addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("eyJhbGci…")
+          .setValue(this.plugin.settings.hardcoverApiToken)
+          .onChange((value) => {
+            this.plugin.settings.hardcoverApiToken = value.trim();
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          });
+      });
+    }
+  }
+
+  private createLibraryThingApiSettings(containerEl: HTMLElement) {
+    const setting = new Setting(containerEl).setName("LibraryThing API key");
+    setting.descEl.appendText(
+      "Developer key for the LibraryThing services API. Request one at ",
+    );
+    setting.descEl.createEl("a", {
+      text: "librarything.com/services/keys.php",
+      href: "https://www.librarything.com/services/keys.php",
+    });
+    setting.descEl.appendText(
+      ". Stored securely in Obsidian's secret storage.",
+    );
+    if (secretStorageAvailable(this.app)) {
+      setting.addComponent((el) =>
+        new SecretComponent(this.app, el)
+          .setValue(this.plugin.settings.librarythingApiKey)
+          .onChange((value) => {
+            this.plugin.settings.librarythingApiKey = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
+    } else {
+      setting.addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("developer key")
+          .setValue(this.plugin.settings.librarythingApiKey)
+          .onChange((value) => {
+            this.plugin.settings.librarythingApiKey = value.trim();
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          });
+      });
+    }
   }
 
   private createWarnOnDuplicateSetting(containerEl: HTMLElement) {
@@ -1011,6 +1118,8 @@ export class BookSearchSettingTab extends PluginSettingTab {
       { id: "google", label: "Google Books" },
       { id: "openlibrary", label: "OpenLibrary" },
       { id: "storygraph", label: "StoryGraph" },
+      { id: "hardcover", label: "Hardcover" },
+      { id: "librarything", label: "LibraryThing" },
       { id: "calibre", label: "Calibre" },
     ];
 
@@ -1347,30 +1456,27 @@ export class BookSearchSettingTab extends PluginSettingTab {
   }
 
   private createTemplateFileSetting(containerEl: HTMLElement) {
-    const templateFileDesc = activeDocument.createDocumentFragment();
-    templateFileDesc.createDiv({
+    const setting = new Setting(containerEl).setName("Template file");
+    setting.descEl.createDiv({
       text: "Files will be available as templates.",
     });
-    templateFileDesc.createEl("a", {
+    setting.descEl.createEl("a", {
       text: "Example template",
       href: `${docUrl}#example-template`,
     });
-    new Setting(containerEl)
-      .setName("Template file")
-      .setDesc(templateFileDesc)
-      .addSearch((cb) => {
-        try {
-          new FileSuggest(this.app, cb.inputEl);
-        } catch {
-          // ignore
-        }
-        cb.setPlaceholder("Example: templates/template-file")
-          .setValue(this.plugin.settings.templateFile)
-          .onChange((newTemplateFile) => {
-            this.plugin.settings.templateFile = newTemplateFile;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
+    setting.addSearch((cb) => {
+      try {
+        new FileSuggest(this.app, cb.inputEl);
+      } catch {
+        // ignore
+      }
+      cb.setPlaceholder("Example: templates/template-file")
+        .setValue(this.plugin.settings.templateFile)
+        .onChange((newTemplateFile) => {
+          this.plugin.settings.templateFile = newTemplateFile;
+          void this.plugin.saveSettings().catch((err) => console.warn(err));
+        });
+    });
   }
 
   display(): void {
@@ -1395,6 +1501,8 @@ export class BookSearchSettingTab extends PluginSettingTab {
     this.createServiceProviderSetting(containerEl);
     this.createShowCoverImageInSearchSetting(containerEl);
     this.createGoogleApiSettings(containerEl);
+    this.createHardcoverApiSettings(containerEl);
+    this.createLibraryThingApiSettings(containerEl);
 
     this.createHeader("Advanced features", containerEl);
     this.createWarnOnDuplicateSetting(containerEl);

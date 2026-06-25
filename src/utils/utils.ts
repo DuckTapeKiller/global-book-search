@@ -190,7 +190,7 @@ export function toStringFrontMatter(frontMatter: object): string {
       if (Array.isArray(newValue)) {
         if (newValue.length === 0) return "";
         const listValues = newValue
-          .map((v) => `  - ${stringifyValue(v)}`)
+          .map((v) => `- ${stringifyValue(v)}`)
           .join("\n");
         return `${key}:\n${listValues}\n`;
       }
