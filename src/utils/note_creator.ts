@@ -7,6 +7,7 @@ import {
   getTemplateContents,
   applyTemplateTransformations,
   executeInlineScriptsTemplates,
+  splitTemplateFrontmatter,
 } from "@utils/template";
 import {
   makeFileName,
@@ -51,14 +52,9 @@ export class BookNoteCreator {
         this.settings.templateFile,
       );
       if (templateContent) {
-        const transformedTemplate =
-          applyTemplateTransformations(templateContent);
-        const splitContent = transformedTemplate.split("---");
-        if (splitContent.length >= 3) {
-          content = splitContent.slice(2).join("---");
-        } else {
-          content = transformedTemplate;
-        }
+        content = splitTemplateFrontmatter(
+          applyTemplateTransformations(templateContent),
+        ).body;
       }
     }
 
@@ -123,11 +119,11 @@ export class BookNoteCreator {
         this.settings.templateFile,
       );
       if (templateContent) {
-        const transformedTemplate =
-          applyTemplateTransformations(templateContent);
-        const splitContent = transformedTemplate.split("---");
-        if (splitContent.length >= 3) {
-          frontmatter = splitContent[1];
+        const templateFrontmatter = splitTemplateFrontmatter(
+          applyTemplateTransformations(templateContent),
+        ).frontmatter;
+        if (templateFrontmatter !== null) {
+          frontmatter = templateFrontmatter;
         }
       }
     }
