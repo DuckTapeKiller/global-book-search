@@ -842,6 +842,21 @@ export class BookSearchSettingTab extends PluginSettingTab {
         });
       });
 
+    if (secretStorageAvailable(this.app)) {
+      new Setting(containerEl)
+        .setName("Google Books API key")
+        .setDesc("Stored securely in Obsidian's secret storage.")
+        .addComponent((el) =>
+          new SecretComponent(this.app, el)
+            .setValue(this.plugin.settings.apiKey)
+            .onChange((value) => {
+              this.plugin.settings.apiKey = value;
+              void this.plugin.saveSettings().catch((err) => console.warn(err));
+            }),
+        );
+      return;
+    }
+
     let tempKeyValue = "";
     const apiKeySetting = new Setting(containerEl).setName("Set API key");
     apiKeySetting.descEl.createDiv({ text: "Set your Books API key." });

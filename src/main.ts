@@ -36,7 +36,11 @@ import {
 } from "@apis/global_search";
 import { VaultIndexEntry, BookEdition } from "@models/accuracy.model";
 import { configureHttp } from "@utils/http";
-import { resolveSecret } from "@utils/secrets";
+import {
+  migrateToSecret,
+  resolveProviderSecrets,
+  resolveSecret,
+} from "@utils/secrets";
 import { asRecord } from "@utils/json";
 import { loadHistory, serializeHistory } from "@utils/provider_history";
 
@@ -354,15 +358,8 @@ export default class BookSearchPlugin extends Plugin {
     }
   }
 
-  // Returns a settings copy with API-key fields resolved from SecretStorage to
-  // their actual values, so providers receive usable tokens regardless of
-  // whether the key is stored as a secret name or as a plain value.
   async resolveProviderSettings(): Promise<BookSearchPluginSettings> {
-    const [hardcoverApiToken, librarythingApiKey] = await Promise.all([
-      resolveSecret(this.app, this.settings.hardcoverApiToken),
-      resolveSecret(this.app, this.settings.librarythingApiKey),
-    ]);
-    return { ...this.settings, hardcoverApiToken, librarythingApiKey };
+    return resolveProviderSecrets(this.app, this.settings);
   }
 
   async insertMetadata(): Promise<void> {
@@ -732,6 +729,18 @@ export default class BookSearchPlugin extends Plugin {
       | undefined;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
     this.applyRuntimeHttpConfig();
+
+    // Move a Google Books key saved as plain text by earlier versions into
+    // SecretStorage, so it no longer lives in data.json.
+    const apiKey = await migrateToSecret(
+      this.app,
+      this.settings.apiKey,
+      "google-books-api-key",
+    );
+    if (apiKey !== this.settings.apiKey) {
+      this.settings.apiKey = apiKey;
+      await this.saveSettings();
+    }
   }
 
   async saveSettings() {
