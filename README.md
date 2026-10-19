@@ -9,6 +9,8 @@
 
 # Global Book Search
 
+<a href="https://community.obsidian.md/plugins/global-book-search"><img alt="Get it on Obsidian" src="assets/get-it-on-obsidian.svg"></a>
+
 **Global Book Search** is an advanced metadata aggregation plugin for Obsidian. It facilitates the creation of comprehensive book notes by consolidating data from multiple international sources, scraping dynamic web content, and applying automated enrichment pipelines.
 
 ---
