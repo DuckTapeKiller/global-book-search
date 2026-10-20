@@ -27,6 +27,72 @@ export function mergeBookData(base: Partial<Book>, extracted: Book): Book {
 
 const GOODREADS_HOST = "https://www.goodreads.com";
 
+// Goodreads answers a request for a dead/unknown book id with HTTP **200** and a
+// chrome page (`<title>Page not found</title>`) whose OpenGraph tags describe
+// the *site*, not a book: og:title "Goodreads", og:image the Goodreads logo,
+// og:description the marketing tagline. Parsing that as a detail page used to
+// overwrite the book's real title/cover/description with site chrome.
+const GOODREADS_CHROME_TITLE =
+  /^(page not found|not found|404|error|sorry,? that page|goodreads)$/i;
+const GOODREADS_LOGO_SRC = /s\.gr-assets\.com\/assets\//i;
+
+/**
+ * True when a fetched page carries book-specific evidence (rather than being a
+ * generic site page): the book title element, JSON-LD `@type: Book`, or a
+ * resolvable Apollo `Book` entity. Used to decide whether an OpenGraph-only
+ * parse is trustworthy.
+ */
+function hasBookIdentity(html: string): boolean {
+  const body = html || "";
+  if (/data-testid=["']bookTitle["']/i.test(body)) return true;
+  if (/id=["']bookTitle["']/i.test(body)) return true;
+
+  for (const block of body.match(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  ) || []) {
+    if (/"@type"\s*:\s*"Book"/i.test(block)) return true;
+  }
+
+  // An Apollo `Book` entity only appears on a real book page; the dead page
+  // keeps the empty ROOT_QUERY field but has no Book record.
+  if (/"__typename"\s*:\s*"Book"/i.test(body)) return true;
+  if (/"getBookByLegacyId"\s*:\s*\{\s*"id"/i.test(body)) return true;
+
+  return false;
+}
+
+/** True when a parsed page is site chrome rather than book data. */
+export function isGoodreadsChromePage(html: string): boolean {
+  const body = html || "";
+  const docTitle = (body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (GOODREADS_CHROME_TITLE.test(docTitle)) return true;
+
+  // OpenGraph title that is just the site name, with no book identity anywhere
+  // in the page, is a chrome page whatever its <title> says.
+  const ogTitle = (
+    body.match(
+      /<meta[^>]+(?:property|name)=["']og:title["'][^>]+content=["']([^"']*)["']/i,
+    )?.[1] || ""
+  )
+    .replace(/\s*\|\s*Goodreads\s*$/i, "")
+    .trim();
+  if (/^goodreads$/i.test(ogTitle) && !hasBookIdentity(body)) return true;
+
+  // A page with no book identity whose only "cover" is a Goodreads site asset.
+  const ogImage =
+    body.match(
+      /<meta[^>]+(?:property|name)=["']og:image["'][^>]+content=["']([^"']*)["']/i,
+    )?.[1] || "";
+  if (ogImage && GOODREADS_LOGO_SRC.test(ogImage) && !hasBookIdentity(body)) {
+    return true;
+  }
+
+  return false;
+}
+
 // Locale-prefixed paths (`/es/book/show/<id>`) dodge the AWS WAF rule that
 // blocks the canonical path, and all return the *same* English book data — the
 // prefix only localises UI chrome, not the apolloState payload (verified across
@@ -824,11 +890,15 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     }
 
     // Tier 6: if nothing beyond the search result could be recovered, say so.
+    // Measured against the *fetched detail*, not the merged result: a book whose
+    // page genuinely lacks publisher/ISBN/genres is not a block, and a block is
+    // still a block when the incoming search result already had those fields.
     const recoveredDetail =
-      !!result.publisher ||
-      !!result.isbn13 ||
-      !!result.isbn10 ||
-      !!result.categories;
+      !!detail &&
+      (!!detail.publisher ||
+        !!detail.isbn13 ||
+        !!detail.isbn10 ||
+        !!detail.categories);
     if (!recoveredDetail) {
       this.warnDetailPageBlocked(this.lastDetailStatus);
     }
@@ -882,6 +952,8 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         try {
           const snap = await archive.run();
           if (!snap) continue;
+          // Archives can hold a not-found/login page too — same guard.
+          if (isGoodreadsChromePage(snap.html)) continue;
           const parsed = this.parseDetailHtml(snap.html, canonical);
           if (parsed.title.trim()) {
             if (getHttpConfig().diagnosticsEnabled) {
@@ -909,6 +981,12 @@ export class GoodreadsApi implements BaseBooksApiImpl {
       );
       this.lastDetailStatus = res.status;
       if (looksLikeBotChallenge(res.status, res.text)) return null;
+      // A 404 (or any error) is not a detail page, whatever the body contains.
+      if (res.status >= 400) return null;
+      // Goodreads serves dead/unknown ids as a 200 chrome page. Reject it here:
+      // its OpenGraph tags are site metadata and would otherwise be merged over
+      // the book's real title, cover and description.
+      if (isGoodreadsChromePage(res.text)) return null;
 
       const parsed = this.parseDetailHtml(res.text, canonicalLink || url);
       return parsed.title.trim() ? parsed : null;

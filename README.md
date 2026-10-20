@@ -22,6 +22,7 @@
 - [Metadata Sources](#metadata-sources)
 - [Universal Enrichment Pipeline](#universal-enrichment-pipeline)
 - [Template System and Variables](#template-system-and-variables)
+- [Duplicate Detection](#i-duplicate-detection)
 - [Calibre Integration](#calibre-integration)
 - [Mobile Optimization](#mobile-optimization)
 - [Installation and Credits](#installation-and-credits)
@@ -33,7 +34,7 @@
 The plugin is designed around a multi-stage extraction engine that prioritizes data integrity and depth. Unlike standard plugins that rely on a single API, **Global Book Search** uses a hybrid approach:
 
 - [x] **Direct API Integration**: Utilizes official REST APIs for Google Books and OpenLibrary.
-- [x] **Resilient Web Scraping**: Emplements custom parsing engines for Goodreads and StoryGraph to capture data not available via public APIs.
+- [x] **Resilient Web Scraping**: Implements custom parsing engines for Goodreads and StoryGraph to capture data not available via public APIs.
 - [x] **Conflict Resolution**: Merges data from multiple providers using a prioritized scoring system.
 
 ---
@@ -113,9 +114,54 @@ Read: false
 ```
 
 ### [i] Supported Languages
-[!] **Default Language**: The plugin initializes with the Spanish template by default.
-[i] **Customization**: You can choose and restore default templates for any of the following 11 languages directly from the settings menu:
-- Spanish, English, French, German, Italian, Portuguese, Dutch, Russian, Simplified Chinese, Japanese, and Korean.
+[!] **Default Language**: The plugin initializes with the English template by default.
+[i] **Customization**: You can choose and restore default templates for any of the following 12 languages directly from the settings menu:
+- Spanish, English, French, German, Italian, Portuguese, Dutch, Russian, Simplified Chinese, Japanese, Korean, and **Arabic**.
+
+Arabic notes use Arabic YAML keys (`العنوان`, `المؤلف`, `الوصف`, `التصنيفات`, `تاريخ النشر`, `مقروء`, …). The keys are ordinary UTF-8, so Obsidian reads them like any other property — only the names change, never the structure:
+
+```yaml
+---
+العنوان: "موسم الهجرة إلى الشمال"
+المؤلف: "الطيب صالح"
+المترجم: "..."
+الوصف: "..."
+عدد الصفحات: "176"
+الناشر: "..."
+التصنيفات:
+- رواية
+- أدب عربي
+isbn 10: "..."
+isbn 13: "..."
+تاريخ النشر: 1966
+الرابط: ...
+tags:
+- الطيب_صالح
+مقروء: false
+---
+```
+
+### [!] List Properties (Categories and Tags)
+Variables that hold several values — such as `{{categories}}` — are written as a **YAML list**, one entry per line:
+
+```yaml
+Categories:
+- Science Fiction
+- Fantasy
+- Adventure
+```
+
+A provider returns its genres as a single comma-separated string (`"Fantasy, Classics"`). Written bare, YAML reads that as one scalar, so Obsidian stores the whole line as a single value. The plugin expands it into a block sequence instead, for both `{{categories}}` and `"{{categories}}"`.
+
+To keep the old flat string for a single field, use the `:raw` modifier: `Categories: {{categories:raw}}`.
+
+### [!] Values That Stay Parseable
+Book metadata regularly contains characters that change a YAML value's meaning. A single broken value invalidates the entire frontmatter block, so the note loses **every** property rather than just the offending one. The plugin quotes and escapes as needed:
+
+- Multi-paragraph descriptions keep their blank lines (written as a quoted scalar with `\n` escapes rather than a raw line break).
+- Values are quoted when a bare scalar would change meaning: a leading `-`, `?`, `:`, `{`, `[`, `#`, `&`, `*`, `!`, `|`, `>`, `@`, `%`, a ` #` sequence, an inner `: `, or a trailing colon.
+- Control characters are escaped rather than emitted raw, and multi-line values are never silently dropped.
+- Page counts and ISBNs stay strings, including for localised keys such as the Arabic `عدد الصفحات`.
 
 ### [!] Mandatory Tag Syntax
 When using the `{{tags}}` variable in YAML, it must be wrapped in quotes to remain valid during the transformation process:
@@ -184,8 +230,10 @@ Original language: {{originalLanguage}}
 
 ## [i] Duplicate Detection
 To maintain vault organization, the plugin includes an automated safeguard:
-- [x] **Vault Scanning**: Before creating a note, the plugin checks for existing files with a matching title or ISBN.
-- [x] **Action Prompts**: If a match is found, you can choose to open the existing note, create a duplicate anyway, or cancel the operation.
+- [x] **Vault Scanning**: Before creating a note, the plugin checks for existing files with a matching title or ISBN. The ISBN check accepts `isbn 10`, `isbn 13`, `isbn10`, `isbn13`, `isbn-13` and YAML numbers, so notes created by this plugin are matched. The title check also recognises the `<title> - <author>` file names the default format produces.
+- [x] **Action Prompts**: If a match is found you can **Open Existing**, **Update Metadata**, **Create Anyway**, or **Cancel**.
+
+**Update Metadata** rewrites the existing note's properties from the freshly fetched data and leaves properties the plugin does not manage — reading dates, ratings, your own notes — untouched.
 
 
 ---

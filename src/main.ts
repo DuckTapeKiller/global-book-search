@@ -38,6 +38,7 @@ import { VaultIndexEntry, BookEdition } from "@models/accuracy.model";
 import { configureHttp } from "@utils/http";
 import { resolveSecret } from "@utils/secrets";
 import { asRecord } from "@utils/json";
+import { frontmatterIsbn } from "@utils/utils";
 import { loadHistory, serializeHistory } from "@utils/provider_history";
 
 export default class BookSearchPlugin extends Plugin {
@@ -52,11 +53,10 @@ export default class BookSearchPlugin extends Plugin {
       const cache = this.app.metadataCache.getFileCache(file);
       if (cache?.frontmatter) {
         const frontmatter = asRecord(cache.frontmatter);
-        // Frontmatter ISBNs may be stored as quoted strings or YAML numbers.
-        const toIsbn = (v: unknown): string =>
-          typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
-        const isbn13 = toIsbn(frontmatter.isbn13);
-        const isbn10 = toIsbn(frontmatter.isbn10);
+        // Templates write `isbn 10`/`isbn 13`; frontmatterIsbn accepts the
+        // spaced, hyphenated and unsuffixed spellings alike.
+        const isbn13 = frontmatterIsbn(frontmatter, 13);
+        const isbn10 = frontmatterIsbn(frontmatter, 10);
         if (isbn13 || isbn10) {
           index.push({
             path: file.path,
@@ -308,6 +308,7 @@ export default class BookSearchPlugin extends Plugin {
       this.settings.folder,
       book.title,
       book.isbn13 || book.isbn10 || book.ids,
+      book.author,
     );
 
     if (existingFile) {
@@ -415,6 +416,12 @@ export default class BookSearchPlugin extends Plugin {
         return;
       }
 
+      if (action === DuplicateAction.UPDATE_METADATA && existingFile) {
+        await this.noteCreator.updateMetadata(existingFile, book);
+        await this.openNewBookNote(existingFile);
+        return;
+      }
+
       const targetFile = await this.noteCreator.create(book);
       await this.openNewBookNote(targetFile);
     } catch (err) {
@@ -454,6 +461,11 @@ export default class BookSearchPlugin extends Plugin {
               await this.checkForDuplicate(book);
             if (action === DuplicateAction.CANCEL) continue;
             if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
+              await this.openNewBookNote(existingFile);
+              continue;
+            }
+            if (action === DuplicateAction.UPDATE_METADATA && existingFile) {
+              await this.noteCreator.updateMetadata(existingFile, book);
               await this.openNewBookNote(existingFile);
               continue;
             }
@@ -518,6 +530,14 @@ export default class BookSearchPlugin extends Plugin {
 
           if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
             progressModal.markDone("Opening existing note...");
+            await this.openNewBookNote(existingFile);
+            continue;
+          }
+
+          if (action === DuplicateAction.UPDATE_METADATA && existingFile) {
+            progressModal.setStatus("Updating existing metadata...");
+            await this.noteCreator.updateMetadata(existingFile, enrichedBook);
+            progressModal.markDone("Metadata updated successfully.");
             await this.openNewBookNote(existingFile);
             continue;
           }

@@ -1,4 +1,5 @@
 import { App, Modal, TFile } from "obsidian";
+import { frontmatterIsbn } from "@utils/utils";
 
 export enum DuplicateAction {
   OPEN_EXISTING = "open",
@@ -101,34 +102,54 @@ export function findExistingBookNote(
   folder: string,
   bookTitle: string,
   isbn?: string,
+  bookAuthor?: string,
 ): TFile | null {
   const files = app.vault.getMarkdownFiles();
   const normalizedTitle = bookTitle.toLowerCase().trim();
+  const withAuthor = bookAuthor
+    ? `${normalizedTitle} - ${bookAuthor.toLowerCase().trim()}`
+    : "";
+  const wanted = (isbn || "").trim();
+
+  // `folder` must match whole path segments: "Books" must not match "Books2/x.md".
+  const inFolder = (path: string): boolean => {
+    if (!folder) return true;
+    const root = folder.replace(/^\/+|\/+$/g, "");
+    if (!root) return true;
+    return path === root || path.startsWith(`${root}/`);
+  };
 
   // 1. Primary Strategy: Match by ISBN (reliable)
-  if (isbn) {
+  if (wanted) {
     const byIsbn = files.find((file) => {
-      if (folder && !file.path.startsWith(folder)) return false;
+      if (!inFolder(file.path)) return false;
       const cache = app.metadataCache.getFileCache(file);
-      if (cache?.frontmatter) {
-        const fm = cache.frontmatter;
-        return (
-          fm.isbn === isbn ||
-          fm.isbn10 === isbn ||
-          fm.isbn13 === isbn ||
-          fm.ids === isbn
-        );
-      }
-      return false;
+      const fm = cache?.frontmatter;
+      if (!fm) return false;
+      // Notes written by this plugin use `isbn 10` / `isbn 13`; also honour the
+      // camelCase spellings used by `useDefaultFrontmatter` notes.
+      return (
+        frontmatterIsbn(fm, 13) === wanted ||
+        frontmatterIsbn(fm, 10) === wanted ||
+        fm.isbn === wanted ||
+        fm.ids === wanted
+      );
     });
     if (byIsbn) return byIsbn;
   }
 
-  // 2. Secondary Strategy: Exact title match (prevent false positives like "It" matching "It Ends with Us")
+  // 2. Secondary Strategy: exact title match, using the same "<title> - <author>"
+  // shape the default file-name format produces (and the bare title, in case the
+  // note was renamed or a custom format was used). Avoids false positives like
+  // "It" matching "It Ends with Us".
   return (
     files.find((file) => {
-      if (folder && !file.path.startsWith(folder)) return false;
-      return file.basename.toLowerCase().trim() === normalizedTitle;
+      if (!inFolder(file.path)) return false;
+      const basename = file.basename.toLowerCase().trim();
+      return (
+        basename === normalizedTitle ||
+        (!!withAuthor && basename === withAuthor)
+      );
     }) || null
   );
 }

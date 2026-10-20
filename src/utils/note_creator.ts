@@ -15,7 +15,31 @@ import {
   toStringFrontMatter,
   parseFrontMatter,
   createBookTags,
+  splitListValue,
+  LIST_VALUE_KEYS,
 } from "@utils/utils";
+
+/**
+ * Read a list-shaped book field (e.g. `categories`) as a list.
+ *
+ * Array values are always accepted. Comma-separated strings are only split when
+ * `commaSeparated` is set, so a single-sentence `description` is never mistaken
+ * for a list. Returns `undefined` when the field is empty or a plain scalar, so
+ * callers fall back to normal variable substitution.
+ */
+function listValueForBookField(
+  book: Book,
+  fieldName: string,
+  { commaSeparated = true }: { commaSeparated?: boolean } = {},
+): string[] | undefined {
+  const raw = (book as unknown as Record<string, unknown>)[fieldName];
+  const items = Array.isArray(raw)
+    ? raw.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : commaSeparated && typeof raw === "string"
+      ? splitListValue(raw)
+      : [];
+  return items.length > 0 ? items : undefined;
+}
 
 export class BookNoteCreator {
   constructor(
@@ -154,18 +178,26 @@ export class BookNoteCreator {
     const resolvedFrontmatter: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(formattedFrontmatter)) {
       if (typeof value === "string") {
-        // A value that is exactly one array variable (e.g. "{{tags}}", unquoted)
-        // must keep its array shape so it serialises as a YAML block sequence
-        // instead of being flattened into an invalid inline string.
-        const single = value.trim().match(/^{{(\w+)}}$/);
-        const bookField = single
-          ? (book as unknown as Record<string, unknown>)[single[1]]
-          : undefined;
-        if (Array.isArray(bookField)) {
-          resolvedFrontmatter[key] = bookField;
-        } else {
-          resolvedFrontmatter[key] = replaceVariableSyntax(book, value);
+        // A value that is exactly one variable (`{{tags}}`, `"{{categories}}"`,
+        // quotes are stripped while parsing) must keep its list shape so it
+        // serialises as a YAML block sequence (dash-separated entries) instead of
+        // one flat comma-joined sentence. List-shaped keys are converted from the
+        // providers' `"a, b, c"` strings into a real list; other fields keep the
+        // previous behaviour (array-valued fields stay arrays, scalars stay flat).
+        const trimmed = value.trim();
+        const variable = trimmed.match(/^(['"]?){{\s*(\w+)\s*}}\1$/);
+        if (variable) {
+          const fieldName = variable[2];
+          const listValue = LIST_VALUE_KEYS.has(fieldName.toLowerCase())
+            ? listValueForBookField(book, fieldName)
+            : listValueForBookField(book, fieldName, { commaSeparated: false });
+          if (listValue) {
+            resolvedFrontmatter[key] = listValue;
+            continue;
+          }
         }
+
+        resolvedFrontmatter[key] = replaceVariableSyntax(book, value);
       } else if (Array.isArray(value)) {
         resolvedFrontmatter[key] = (value as unknown[]).map((v) =>
           typeof v === "string" ? replaceVariableSyntax(book, v) : v,
