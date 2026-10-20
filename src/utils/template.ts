@@ -133,3 +133,17 @@ export async function useTemplaterPluginInFile(app: App, file: TFile) {
     await templater.templater?.overwrite_file_commands(file);
   }
 }
+
+// A template has a frontmatter block only if it opens with `---`. Anything
+// else is body text, even when it contains `---`: a horizontal rule, or a
+// Templater tag such as `<%"---"%>` that writes the delimiter when Templater
+// runs.
+export function splitTemplateFrontmatter(template: string): {
+  frontmatter: string | null;
+  body: string;
+} {
+  if (!/^---\r?\n/.test(template)) return { frontmatter: null, body: template };
+  const parts = template.split("---");
+  if (parts.length < 3) return { frontmatter: null, body: template };
+  return { frontmatter: parts[1], body: parts.slice(2).join("---") };
+}
