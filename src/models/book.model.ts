@@ -43,10 +43,14 @@ export interface Book {
   originalLanguage?: string;
   relatedMovies?: string;
 
-  // Calibre-specific
+  // Series. Providers set `series` and `seriesNumber`; `seriesLink` (a
+  // [[wikilink]] to the series, empty when linking is switched off) is derived
+  // by `applySeriesFields` when the note is rendered.
   series?: string;
   seriesNumber?: number | string;
   seriesLink?: string;
+
+  // Calibre-specific
   ids?: string;
   customColumns?: Record<string, unknown>;
   sourceProvider?: string;

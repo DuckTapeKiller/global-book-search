@@ -283,6 +283,12 @@ export function toStringFrontMatter(frontMatter: object): string {
         const escapedValue = cleanValue.replace(/"/g, '\\"');
         return `${key}: "${escapedValue}"\n`;
       }
+
+      // A bare [[wikilink]] (for example {{seriesLink}}) is read as a nested
+      // list, which Obsidian rejects as a property value, so quote it.
+      if (/^\[\[[^\]]*\]\]$/.test(stringValue)) {
+        return `${key}: "${stringValue}"\n`;
+      }
       return `${key}: ${stringValue}\n`;
     })
     .join("")

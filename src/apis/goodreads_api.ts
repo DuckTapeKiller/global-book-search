@@ -2,6 +2,8 @@ import { Notice } from "obsidian";
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
 import { getHttpConfig, httpRequest, looksLikeBotChallenge } from "@utils/http";
+import { getArray, getPath, getProp, getString } from "@utils/json";
+import { parseSeriesFromTitle, seriesFromTitle } from "@utils/series";
 
 /**
  * Merge detail-page data into the search-result book without ever letting an
@@ -21,6 +23,12 @@ export function mergeBookData(base: Partial<Book>, extracted: Book): Book {
     if (!isEmpty) {
       merged[key] = value;
     }
+  }
+  // A series and its number belong together: when the extraction names a
+  // series, its number (even an empty one) comes with it, so one source's
+  // series is never paired with another source's position.
+  if (typeof extracted.series === "string" && extracted.series.trim()) {
+    merged.seriesNumber = extracted.seriesNumber;
   }
   return merged as unknown as Book;
 }
@@ -237,12 +245,62 @@ export function parseOgMetaBook(html: string): Partial<Book> {
   };
 
   const title = read("og:title") || read("twitter:title");
-  if (title) out.title = title.replace(/\s*\|\s*Goodreads\s*$/i, "").trim();
+  if (title) {
+    out.title = title.replace(/\s*\|\s*Goodreads\s*$/i, "").trim();
+    Object.assign(out, seriesFromTitle(out.title));
+  }
   const image = read("og:image");
   if (image) out.coverUrl = image;
   const description = read("og:description");
   if (description) out.description = description;
   return out;
+}
+
+/**
+ * The book's main series from Goodreads' Apollo state, e.g. Discworld #1.
+ *
+ * `bookSeries` lists every series the book belongs to: the main series, any
+ * sub-series and foreign-language collections. Goodreads' own data is trusted
+ * over the title: the listed series named in `titleComplete` ("The Colour of
+ * Magic (Discworld, #1)") wins, otherwise the first listed one. Only when
+ * `bookSeries` is empty does the series in `titleComplete` serve as the answer.
+ * Pure, so it can be tested without a DOM.
+ */
+export function extractApolloSeries(
+  apolloState: unknown,
+  bookJson: unknown,
+): { series: string; seriesNumber: string } {
+  const entries: Array<{ series: string; seriesNumber: string }> = [];
+  for (const item of getArray(getProp(bookJson, "bookSeries"))) {
+    const ref = getString(getPath(item, ["series", "__ref"]));
+    const series = ref
+      ? getString(getPath(getProp(apolloState, ref), ["title"])).trim()
+      : "";
+    if (!series) continue;
+    const position = getProp(item, "userPosition");
+    entries.push({
+      series,
+      seriesNumber:
+        typeof position === "number" && Number.isFinite(position)
+          ? String(position)
+          : getString(position).trim(),
+    });
+  }
+
+  const fromTitle = parseSeriesFromTitle(
+    getString(getProp(bookJson, "titleComplete")),
+  );
+  const named = fromTitle
+    ? entries.find((entry) => entry.series === fromTitle.series)
+    : undefined;
+  const chosen =
+    named ??
+    entries[0] ??
+    (fromTitle && {
+      series: fromTitle.series,
+      seriesNumber: fromTitle.seriesNumber,
+    });
+  return chosen || { series: "", seriesNumber: "" };
 }
 
 // Remembers which Tier-1 route last worked, across GoodreadsApi instances
@@ -477,6 +535,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
       asin,
       coverUrl,
       originalTitle,
+      ...extractApolloSeries(apolloState, bookJson),
       _authors: authors,
       _translators: translators,
     };
@@ -610,6 +669,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         narrator: "",
         subtitle: "",
         asin: "",
+        ...seriesFromTitle(title),
       });
     });
 
@@ -670,6 +730,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         narrator: "",
         subtitle: "",
         asin: "",
+        ...seriesFromTitle(title),
       });
     }
 
@@ -774,6 +835,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
           narrator: "",
           subtitle: "",
           asin: "",
+          ...seriesFromTitle(title),
         });
       }
 
@@ -1161,6 +1223,8 @@ export class GoodreadsApi implements BaseBooksApiImpl {
       translator,
       narrator: "",
       asin,
+      series: apollo.series || "",
+      seriesNumber: apollo.seriesNumber || "",
     };
   }
 }

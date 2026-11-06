@@ -1,4 +1,5 @@
 import { apiGet, BaseBooksApiImpl } from "@apis/base_api";
+import { ProviderBlockedError } from "@utils/http";
 import { Book } from "@models/book.model";
 import {
   GoogleBooksResponse,
@@ -52,6 +53,7 @@ export class GoogleBooksApi implements BaseBooksApiImpl {
         "https://www.googleapis.com/books/v1/volumes",
         params,
         this.apiKey ? { "X-goog-api-key": this.apiKey } : undefined,
+        "google",
       );
       if (!searchResults?.totalItems) return [];
 
@@ -68,6 +70,16 @@ export class GoogleBooksApi implements BaseBooksApiImpl {
         })
         .map(({ volumeInfo }) => this.createBookItem(volumeInfo));
     } catch (error) {
+      // The most common failure: the free quota shared by every user without
+      // a key is used up. Say so, and how to fix it, instead of "no results".
+      if ((error as { status?: number }).status === 429) {
+        throw new ProviderBlockedError("google", 429, 0, {
+          message: this.apiKey
+            ? "Google Books refused the request (HTTP 429): your API key has used up its quota for now. Try again later."
+            : "Google Books' free shared quota has run out (HTTP 429). Add your own free API key in Settings → Global Book Search → Sources → Google Books.",
+          shortReason: "quota used up",
+        });
+      }
       console.warn(error);
       throw error;
     }

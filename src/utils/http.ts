@@ -3,6 +3,7 @@ import {
   type RequestUrlParam,
   type RequestUrlResponse,
 } from "obsidian";
+import { GLOBAL_SEARCH_SOURCE_LABELS } from "@src/constants";
 import {
   recordProviderFailure,
   recordProviderSuccess,
@@ -69,9 +70,26 @@ function cacheKey(
   req: RequestUrlParam,
   responseType: HttpResponseType,
 ): string {
-  // We only cache GETs, so url + accept header + responseType is sufficient.
+  // GETs only: url + accept header + responseType, plus the login the request
+  // carries, so a response fetched with one login is never served for another.
   const accept = (req.headers?.Accept || req.headers?.accept || "").toString();
-  return `GET ${req.url} | accept=${accept} | type=${responseType}`;
+  return `GET ${req.url} | accept=${accept} | type=${responseType} | login=${credentialTag(req)}`;
+}
+
+/**
+ * A short fingerprint of the login (Cookie header) a request carries, or ""
+ * for an anonymous request. Keeps logins apart in the cache and in challenge
+ * cooldowns without keeping the cookie itself.
+ */
+function credentialTag(req: RequestUrlParam): string {
+  const cookie = headerValue(req.headers, "cookie");
+  if (!cookie) return "";
+  let hash = 0x811c9dc5; // FNV-1a, 32 bit
+  for (let i = 0; i < cookie.length; i++) {
+    hash ^= cookie.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16);
 }
 
 function isRetryableStatus(status?: number): boolean {
@@ -93,11 +111,83 @@ const BOT_CHALLENGE_MARKERS = [
 export function looksLikeBotChallenge(
   status?: number,
   bodyText?: string,
+  headers?: Record<string, string>,
 ): boolean {
   if (status === 202) return true;
+  if (isCloudflareChallenge(headers, bodyText)) return true;
   const head = (bodyText || "").slice(0, 5000).toLowerCase();
   if (!head) return false;
   return BOT_CHALLENGE_MARKERS.some((marker) => head.includes(marker));
+}
+
+function headerValue(
+  headers: Record<string, string> | undefined,
+  name: string,
+): string {
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (key.toLowerCase() === name) return String(value);
+  }
+  return "";
+}
+
+/**
+ * A Cloudflare managed challenge ("Just a moment..."). Cloudflare marks these
+ * with a `cf-mitigated: challenge` header; the page itself is the fallback
+ * check. Cloudflare's `challenge-platform` script is also injected into
+ * ordinary pages, so it is deliberately not treated as a sign of a challenge.
+ */
+export function isCloudflareChallenge(
+  headers?: Record<string, string>,
+  bodyText?: string,
+): boolean {
+  if (headerValue(headers, "cf-mitigated").toLowerCase() === "challenge") {
+    return true;
+  }
+  const head = (bodyText || "").slice(0, 6000).toLowerCase();
+  return (
+    head.includes("<title>just a moment...</title>") &&
+    head.includes("challenges.cloudflare.com")
+  );
+}
+
+/** How long a host that served a Cloudflare challenge is left alone. */
+export const CHALLENGE_COOLDOWN_MS = 10 * 60 * 1000;
+
+/**
+ * A provider refusing requests: a bot check that plain requests cannot pass
+ * (thrown by `httpRequest` to callers that pass `rejectOnChallenge`), or a
+ * provider's own refusal such as a used-up quota. The message is meant to be
+ * shown to the user as it is; `shortReason` suits compact status lines.
+ */
+export class ProviderBlockedError extends Error {
+  /** A few words for compact status lines, such as "blocked". */
+  readonly shortReason: string;
+
+  constructor(
+    readonly providerId: string,
+    readonly status: number,
+    readonly retryInMs: number,
+    detail: { message?: string; shortReason?: string } = {},
+  ) {
+    const label = GLOBAL_SEARCH_SOURCE_LABELS[providerId] || providerId;
+    const minutes = Math.max(1, Math.ceil(retryInMs / 60_000));
+    super(
+      detail.message ??
+        `${label} is blocking automated requests (a Cloudflare bot check, HTTP ${status}). ` +
+          `Try another source; ${label} will be tried again in about ${minutes} min.`,
+    );
+    this.name = "ProviderBlockedError";
+    this.shortReason = detail.shortReason ?? "blocked";
+  }
+}
+
+// Host (and login) pairs that recently served a challenge, and when they may
+// be tried again. A request with a different login is not held back.
+const challengeUntil = new Map<string, number>();
+
+function cooldownKey(host: string, req: RequestUrlParam): string {
+  const tag = credentialTag(req);
+  return tag ? `${host}#${tag}` : host;
 }
 
 function getContentType(headers: Record<string, string>): string {
@@ -134,6 +224,10 @@ export interface HttpRequestOptions {
   bypassCache?: boolean;
   // Overrides global config per call.
   maxRetries?: number;
+  // Throw ProviderBlockedError when the host answers with a Cloudflare
+  // challenge, and skip the request outright while the host is cooling down
+  // from an earlier one. Without it the challenge page is returned as is.
+  rejectOnChallenge?: boolean;
 }
 
 export async function httpRequest(
@@ -169,6 +263,12 @@ export async function httpRequest(
   }
 
   const host = getHost(req.url);
+  if (options.rejectOnChallenge && host) {
+    const retryInMs = (challengeUntil.get(cooldownKey(host, req)) ?? 0) - now();
+    if (retryInMs > 0) {
+      throw new ProviderBlockedError(providerId, 403, retryInMs);
+    }
+  }
   if (host && httpConfig.rateLimitMs > 0) {
     const nextAllowedAt = nextAllowedAtByHost.get(host) || 0;
     const wait = nextAllowedAt - now();
@@ -219,9 +319,12 @@ export async function httpRequest(
         }
       }
 
+      const challenged =
+        responseType !== "arrayBuffer" &&
+        isCloudflareChallenge(res.headers, normalizedText);
       const blocked =
         responseType !== "arrayBuffer" &&
-        looksLikeBotChallenge(res.status, normalizedText);
+        looksLikeBotChallenge(res.status, normalizedText, res.headers);
 
       if (blocked) {
         recordProviderFailure(
@@ -237,6 +340,20 @@ export async function httpRequest(
           new Error(`HTTP ${res.status}`),
           res.status,
         );
+      }
+
+      if (challenged && host) {
+        challengeUntil.set(
+          cooldownKey(host, req),
+          now() + CHALLENGE_COOLDOWN_MS,
+        );
+        if (options.rejectOnChallenge) {
+          throw new ProviderBlockedError(
+            providerId,
+            res.status,
+            CHALLENGE_COOLDOWN_MS,
+          );
+        }
       }
 
       // Cache successful responses only. Never cache bot-challenge pages:
@@ -260,8 +377,13 @@ export async function httpRequest(
         });
       }
 
-      // Retry on rate-limit / server errors / bot challenges.
-      if (attempt < retries && (blocked || isRetryableStatus(res.status))) {
+      // Retry on rate-limit / server errors / bot challenges. A Cloudflare
+      // challenge never clears on retry, and retrying only hammers the host.
+      if (
+        attempt < retries &&
+        !challenged &&
+        (blocked || isRetryableStatus(res.status))
+      ) {
         const delay = httpConfig.retryBaseDelayMs * Math.pow(2, attempt);
         if (httpConfig.diagnosticsEnabled) {
           console.debug(
@@ -287,6 +409,8 @@ export async function httpRequest(
         json: responseType === "json" ? normalizedJson : undefined,
       };
     } catch (err: unknown) {
+      // Already recorded above; retrying would not change the outcome.
+      if (err instanceof ProviderBlockedError) throw err;
       lastError = err;
 
       const status = (
@@ -319,4 +443,5 @@ export async function httpRequest(
 
 export function clearHttpCache(): void {
   responseCache.clear();
+  challengeUntil.clear();
 }

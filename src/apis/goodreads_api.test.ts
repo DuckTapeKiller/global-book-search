@@ -5,6 +5,7 @@ import {
   waybackRawUrl,
   parseLdJsonBook,
   parseOgMetaBook,
+  extractApolloSeries,
 } from "@apis/goodreads_api";
 import { Book } from "@models/book.model";
 
@@ -228,5 +229,226 @@ describe("parseOgMetaBook", () => {
   it("handles content-before-property attribute order", () => {
     const html = `<meta content="My Title" property="og:title">`;
     expect(parseOgMetaBook(html).title).toBe("My Title");
+  });
+
+  it("reads the series from an og:title that carries one", () => {
+    // Real og:title of https://www.goodreads.com/book/show/601238
+    const html = `<meta property="og:title" content="The Colour of Magic (Discworld, #1)" />`;
+    const book = parseOgMetaBook(html);
+    expect(book.title).toBe("The Colour of Magic (Discworld, #1)");
+    expect(book.series).toBe("Discworld");
+    expect(book.seriesNumber).toBe("1");
+  });
+
+  it("sets no series for a standalone book", () => {
+    const html = `<meta property="og:title" content="Sapiens: A Brief History of Humankind | Goodreads" />`;
+    const book = parseOgMetaBook(html);
+    expect(book.series).toBeUndefined();
+    expect(book.seriesNumber).toBeUndefined();
+  });
+});
+
+// Modelled on the Apollo state of https://www.goodreads.com/book/show/601238
+// (The Colour of Magic), keeping only what the series parser reads and with the
+// reference ids shortened.
+const colourOfMagicApolloState = {
+  "Series:kca://series/discworld": {
+    __typename: "Series",
+    title: "Discworld",
+    webUrl: "https://www.goodreads.com/series/40650-discworld",
+  },
+  "Series:kca://series/rincewind": {
+    __typename: "Series",
+    title: "Discworld - Rincewind",
+    webUrl: "https://www.goodreads.com/series/109518-discworld---rincewind",
+  },
+  "Series:kca://series/polish": {
+    __typename: "Series",
+    title: "Kolekcja \u015awiat Dysku",
+    webUrl: "https://www.goodreads.com/series/208816-kolekcja-wiat-dysku",
+  },
+};
+
+const colourOfMagicBook = {
+  title: "The Colour of Magic",
+  titleComplete: "The Colour of Magic (Discworld, #1)",
+  bookSeries: [
+    {
+      __typename: "BookSeries",
+      userPosition: "1",
+      series: { __ref: "Series:kca://series/discworld" },
+    },
+    {
+      __typename: "BookSeries",
+      userPosition: "1",
+      series: { __ref: "Series:kca://series/rincewind" },
+    },
+    {
+      __typename: "BookSeries",
+      userPosition: "10",
+      series: { __ref: "Series:kca://series/polish" },
+    },
+  ],
+};
+
+describe("extractApolloSeries", () => {
+  it("picks the main series of a real book, not its sub-series or collections", () => {
+    expect(
+      extractApolloSeries(colourOfMagicApolloState, colourOfMagicBook),
+    ).toEqual({ series: "Discworld", seriesNumber: "1" });
+  });
+
+  it("picks the series named in the full title even when it is not listed first", () => {
+    const reordered = {
+      ...colourOfMagicBook,
+      bookSeries: [...colourOfMagicBook.bookSeries].reverse(),
+    };
+    expect(extractApolloSeries(colourOfMagicApolloState, reordered)).toEqual({
+      series: "Discworld",
+      seriesNumber: "1",
+    });
+  });
+
+  it("takes the first listed series when the title names none", () => {
+    const bare = { ...colourOfMagicBook, titleComplete: "The Colour of Magic" };
+    expect(extractApolloSeries(colourOfMagicApolloState, bare)).toEqual({
+      series: "Discworld",
+      seriesNumber: "1",
+    });
+  });
+
+  it("trusts the listed series over a different one named in the title (real omnibus)", () => {
+    // https://www.goodreads.com/book/show/33: the title says "The Lord of the
+    // Rings, #1-3" but Goodreads lists only "Middle Earth", positions 2-4.
+    const state = {
+      "Series:kca://series/middle-earth": { title: "Middle Earth" },
+    };
+    const omnibus = {
+      titleComplete: "The Lord of the Rings (The Lord of the Rings, #1-3)",
+      bookSeries: [
+        {
+          userPosition: "2-4",
+          series: { __ref: "Series:kca://series/middle-earth" },
+        },
+      ],
+    };
+    expect(extractApolloSeries(state, omnibus)).toEqual({
+      series: "Middle Earth",
+      seriesNumber: "2-4",
+    });
+  });
+
+  it("accepts a numeric position", () => {
+    const book = {
+      titleComplete: "X",
+      bookSeries: [
+        { userPosition: 2, series: { __ref: "Series:kca://series/discworld" } },
+      ],
+    };
+    expect(extractApolloSeries(colourOfMagicApolloState, book)).toEqual({
+      series: "Discworld",
+      seriesNumber: "2",
+    });
+  });
+
+  it("returns an empty number for a series without a position", () => {
+    const book = {
+      titleComplete: "Short Story",
+      bookSeries: [
+        {
+          userPosition: null,
+          series: { __ref: "Series:kca://series/discworld" },
+        },
+      ],
+    };
+    expect(extractApolloSeries(colourOfMagicApolloState, book)).toEqual({
+      series: "Discworld",
+      seriesNumber: "",
+    });
+  });
+
+  it("falls back to the series in the full title when bookSeries is empty", () => {
+    const book = {
+      titleComplete: "Fuzzy Nation (Fuzzy Sapiens, #7)",
+      bookSeries: [],
+    };
+    expect(extractApolloSeries({}, book)).toEqual({
+      series: "Fuzzy Sapiens",
+      seriesNumber: "7",
+    });
+  });
+
+  it("returns nothing for a standalone book", () => {
+    const book = {
+      titleComplete: "Sapiens: A Brief History of Humankind",
+      bookSeries: [],
+    };
+    expect(extractApolloSeries({}, book)).toEqual({
+      series: "",
+      seriesNumber: "",
+    });
+  });
+
+  it("skips entries whose series cannot be resolved and survives malformed data", () => {
+    const book = {
+      titleComplete: "X",
+      bookSeries: [
+        null,
+        "junk",
+        { userPosition: "1" },
+        { userPosition: "2", series: { __ref: "Series:kca://series/missing" } },
+        {
+          userPosition: "3",
+          series: { __ref: "Series:kca://series/discworld" },
+        },
+      ],
+    };
+    expect(extractApolloSeries(colourOfMagicApolloState, book)).toEqual({
+      series: "Discworld",
+      seriesNumber: "3",
+    });
+    expect(extractApolloSeries(undefined, undefined)).toEqual({
+      series: "",
+      seriesNumber: "",
+    });
+  });
+});
+
+describe("mergeBookData with series", () => {
+  const withSeries: Book = {
+    ...searchResultBook,
+    series: "Discworld",
+    seriesNumber: "1",
+  };
+
+  it("keeps the series from the search result when the detail page has none", () => {
+    const merged = mergeBookData(withSeries, {
+      ...blankExtraction,
+      series: "",
+      seriesNumber: "",
+    });
+    expect(merged.series).toBe("Discworld");
+    expect(merged.seriesNumber).toBe("1");
+  });
+
+  it("never pairs one source's series with another source's number", () => {
+    // The detail page names a series without a position; the search result's
+    // number belongs to a different series and must not be carried over.
+    const merged = mergeBookData(withSeries, {
+      ...blankExtraction,
+      series: "Middle Earth",
+      seriesNumber: "",
+    });
+    expect(merged.series).toBe("Middle Earth");
+    expect(merged.seriesNumber).toBe("");
+  });
+
+  it("lets the detail page's series replace the search result's", () => {
+    const merged = mergeBookData(withSeries, {
+      ...blankExtraction,
+      series: "Discworld - Rincewind",
+      seriesNumber: "1",
+    });
+    expect(merged.series).toBe("Discworld - Rincewind");
   });
 });
