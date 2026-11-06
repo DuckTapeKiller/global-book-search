@@ -1,4 +1,4 @@
-import { httpRequest } from "@utils/http";
+import { httpRequest, ProviderBlockedError } from "@utils/http";
 import { Book } from "@models/book.model";
 import { BookSearchPluginSettings } from "@settings/settings";
 import { GLOBAL_SEARCH_SOURCE_LABELS } from "@src/constants";
@@ -6,7 +6,7 @@ import { factoryServiceProvider } from "@apis/base_api";
 import { GoogleBooksApi } from "@apis/google_books_api";
 import { OpenLibraryApi } from "@apis/open_library_api";
 import { GoodreadsApi } from "@apis/goodreads_api";
-import { StoryGraphApi } from "@apis/storygraph_api";
+import { StoryGraphApi, storyGraphLogin } from "@apis/storygraph_api";
 import { scoreBookCandidate } from "@utils/edition_score";
 import { getArray, getProp } from "@utils/json";
 
@@ -259,6 +259,12 @@ export async function globalSearch(
         _sourceLabels: [GLOBAL_SEARCH_SOURCE_LABELS[providerId] || providerId],
       }));
     } catch (error) {
+      if (error instanceof ProviderBlockedError) {
+        onProgress?.(
+          `${GLOBAL_SEARCH_SOURCE_LABELS[providerId]} — ${error.shortReason}`,
+        );
+        return [] as BookWithSource[];
+      }
       console.warn(`Global Search: Provider ${providerId} failed`, error);
       onProgress?.(`${GLOBAL_SEARCH_SOURCE_LABELS[providerId]} — no results`);
       return [] as BookWithSource[];
@@ -503,7 +509,7 @@ export async function enrichBookByISBN(
           }
 
           if (id === "storygraph") {
-            const api = new StoryGraphApi();
+            const api = new StoryGraphApi(storyGraphLogin(settings));
             const results = await Promise.race([
               api.getByQuery(isbn),
               timeoutReject<Book[]>(8000, id),
@@ -550,7 +556,9 @@ export async function enrichBookByISBN(
 
           return null;
         } catch (err) {
-          console.warn(`Enrichment: secondary provider ${id} failed`, err);
+          if (!(err instanceof ProviderBlockedError)) {
+            console.warn(`Enrichment: secondary provider ${id} failed`, err);
+          }
           return null;
         }
       },
@@ -742,7 +750,7 @@ export async function enrichFromIsbn(
         }
 
         if (id === "storygraph") {
-          const api = new StoryGraphApi();
+          const api = new StoryGraphApi(storyGraphLogin(settings));
           const results = await Promise.race([
             api.getByQuery(normalized),
             timeoutReject<Book[]>(10000, id),
@@ -752,7 +760,9 @@ export async function enrichFromIsbn(
 
         return null;
       } catch (err) {
-        console.warn(`enrichFromIsbn: provider ${id} failed`, err);
+        if (!(err instanceof ProviderBlockedError)) {
+          console.warn(`enrichFromIsbn: provider ${id} failed`, err);
+        }
         return null;
       }
     }),
@@ -804,7 +814,7 @@ export async function enrichFromIsbn(
   return enrichBookByISBN(primary, settings, onProgress);
 }
 
-function mergeWithConflicts(
+export function mergeWithConflicts(
   primary: Book,
   goodreads: Book | null,
   secondaries: BookWithSource[],
@@ -845,12 +855,14 @@ function mergeWithConflicts(
 
   const pickPreferredValue = (
     field: keyof Book,
-  ): { value: unknown; sourceLabel?: string } | null => {
+  ): { value: unknown; sourceLabel?: string; book: Book } | null => {
     const order = settings.fieldSourcePreferences?.[field as string] || [];
     for (const pref of order) {
       const source = sourcesById[pref];
       const val = source?.book?.[field];
-      if (isNonEmpty(val)) return { value: val, sourceLabel: source.label };
+      if (isNonEmpty(val)) {
+        return { value: val, sourceLabel: source.label, book: source.book };
+      }
     }
 
     // Fallback: first non-empty value from any source, prioritizing primary then Goodreads.
@@ -864,12 +876,16 @@ function mergeWithConflicts(
     for (const id of fallbackIds) {
       const source = sourcesById[id];
       const val = source?.book?.[field];
-      if (isNonEmpty(val)) return { value: val, sourceLabel: source.label };
+      if (isNonEmpty(val)) {
+        return { value: val, sourceLabel: source.label, book: source.book };
+      }
     }
 
     for (const source of Object.values(sourcesById)) {
       const val = source.book?.[field];
-      if (isNonEmpty(val)) return { value: val, sourceLabel: source.label };
+      if (isNonEmpty(val)) {
+        return { value: val, sourceLabel: source.label, book: source.book };
+      }
     }
 
     return null;
@@ -965,6 +981,15 @@ function mergeWithConflicts(
     (result as unknown as Record<string, unknown>)[field as string] =
       preferred.value;
     if (preferred.sourceLabel) contributingSources.add(preferred.sourceLabel);
+  }
+
+  // A series and its number only make sense together, so both come from the
+  // same source rather than being picked field by field.
+  const series = pickPreferredValue("series");
+  if (series) {
+    result.series = series.book.series;
+    result.seriesNumber = series.book.seriesNumber;
+    if (series.sourceLabel) contributingSources.add(series.sourceLabel);
   }
 
   return {

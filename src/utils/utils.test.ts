@@ -21,6 +21,23 @@ describe("util.js", () => {
     ).toContain("tags:\n- author/kafka\n- libros/x");
   });
 
+  it("toStringFrontMatter quotes a bare wikilink so it is not read as a nested list", () => {
+    expect(utils.toStringFrontMatter({ Series: "[[Discworld]]" })).toBe(
+      'Series: "[[Discworld]]"',
+    );
+    // Already quoted: left as a single quoted value.
+    expect(utils.toStringFrontMatter({ Series: '"[[Discworld]]"' })).toBe(
+      'Series: "[[Discworld]]"',
+    );
+    // Not a bare wikilink: unchanged.
+    expect(utils.toStringFrontMatter({ Series: "Discworld" })).toBe(
+      "Series: Discworld",
+    );
+    expect(utils.toStringFrontMatter({ Series: "[[A]] and [[B]]" })).toBe(
+      "Series: [[A]] and [[B]]",
+    );
+  });
+
   it("replaceIllegalFileNameCharactersInString 1", () => {
     expect(
       utils.replaceIllegalFileNameCharactersInString(

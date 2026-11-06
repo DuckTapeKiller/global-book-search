@@ -6,7 +6,7 @@ import { GoogleBooksApi } from "./google_books_api";
 import { GoodreadsApi } from "./goodreads_api";
 import { CalibreApi } from "./calibre_api";
 import { OpenLibraryApi } from "./open_library_api";
-import { StoryGraphApi } from "./storygraph_api";
+import { StoryGraphApi, storyGraphLogin } from "./storygraph_api";
 import { HardcoverApi } from "./hardcover_api";
 import { LibraryThingApi } from "./librarything_api";
 
@@ -40,7 +40,7 @@ export function factoryServiceProvider(
     case ServiceProvider.openlibrary:
       return new OpenLibraryApi();
     case ServiceProvider.storygraph:
-      return new StoryGraphApi();
+      return new StoryGraphApi(storyGraphLogin(settings));
     case ServiceProvider.hardcover:
       return new HardcoverApi(
         settings.hardcoverApiToken,
@@ -67,60 +67,49 @@ function resolveLocale(preference: string): string {
   }
 }
 
-const MAX_RETRIES = 2;
-const RETRY_DELAY = 1000;
-
-async function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
+/**
+ * GET a JSON API and return the parsed body. `httpRequest` already retries
+ * rate limits, server errors and network failures (Diagnostics → Retry count),
+ * so there is no second retry loop here: the old one multiplied the attempts.
+ * An error status is thrown with `status`, never returned as if it were data.
+ * `providerId` files the request under its source in the service-performance
+ * panel (it was always "http", which hid Google Books there).
+ */
 export async function apiGet<T>(
   url: string,
   params: Record<string, string | number> = {},
   headers?: Record<string, string>,
+  providerId = "http",
 ): Promise<T> {
   const apiURL = new URL(url);
   appendQueryParams(apiURL, params);
 
-  let lastError: unknown;
+  const res = await httpRequest(
+    {
+      url: apiURL.href,
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+        ...headers,
+      },
+    },
+    {
+      providerId,
+      purpose: "apiGet",
+      responseType: "json",
+      cacheTtlMs: 60_000,
+    },
+  );
 
-  for (let i = 0; i <= MAX_RETRIES; i++) {
-    try {
-      const res = await httpRequest(
-        {
-          url: apiURL.href,
-          method: "GET",
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            Accept: "application/json",
-            "Content-Type": "application/json; charset=utf-8",
-            ...headers,
-          },
-        },
-        {
-          providerId: "http",
-          purpose: "apiGet",
-          responseType: "json",
-          cacheTtlMs: 60_000,
-        },
-      );
-
-      return res.json as T;
-    } catch (error: unknown) {
-      lastError = error;
-      const err = error as { status?: number; message?: string };
-      const isRetryable =
-        !err.status || err.status === 429 || err.status >= 500;
-      if (isRetryable && i < MAX_RETRIES) {
-        await delay(RETRY_DELAY * (i + 1));
-        continue;
-      }
-      break;
-    }
+  if (res.status >= 400) {
+    throw Object.assign(new Error(`HTTP ${res.status} from ${apiURL.host}`), {
+      status: res.status,
+    });
   }
-
-  throw lastError;
+  return res.json as T;
 }
 
 function appendQueryParams(

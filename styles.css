@@ -49,6 +49,7 @@ body .book-search-plugin__header.book-search-plugin__header {
 
 .book-search-plugin__settings-button-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
 }
@@ -70,23 +71,6 @@ body
   .book-search-plugin__settings
   .book-search-plugin__settings--textarea.book-search-plugin__settings--textarea {
   margin-left: auto;
-}
-
-.book-search-plugin__settings--new_file_name {
-  padding-bottom: 0;
-  margin-bottom: 0;
-}
-
-.book-search-plugin__settings--service_provider .dropdown {
-  text-transform: capitalize;
-}
-
-.book-search-plugin__hide {
-  display: none;
-}
-
-.book-search-plugin__show {
-  display: flex;
 }
 
 .book-search-plugin__search-modal--input {
@@ -1535,4 +1519,216 @@ body.is-mobile
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* ── Settings: tabs ─────────────────────────────────────────────────────── */
+/* Tabs wrap onto a second line on narrow screens, so none is ever hidden. */
+.book-search-plugin__settings .bsp-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2px;
+  margin: 0 0 var(--size-4-3);
+  border-bottom: var(--border-width) solid var(--background-modifier-border);
+}
+
+.book-search-plugin__settings .bsp-tabs .bsp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  flex: 0 0 auto;
+  height: auto;
+  margin: 0 0 calc(-1 * var(--border-width));
+  padding: var(--size-4-2) var(--size-4-3);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.book-search-plugin__settings .bsp-tabs .bsp-tab:hover {
+  background: none;
+  color: var(--text-normal);
+}
+
+.book-search-plugin__settings .bsp-tabs .bsp-tab.is-active {
+  border-bottom-color: var(--interactive-accent);
+  color: var(--text-accent);
+}
+
+.book-search-plugin__settings .bsp-tabs .bsp-tab:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.book-search-plugin__settings .bsp-tab-icon {
+  display: inline-flex;
+}
+
+.book-search-plugin__settings .bsp-tab-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.book-search-plugin__settings .bsp-tab-intro,
+.book-search-plugin__settings .bsp-section-note {
+  margin: 0 0 var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+/* ── Settings: one heading per source, with a status label ─────────────── */
+.book-search-plugin__settings .bsp-source-heading {
+  margin-top: var(--size-4-4);
+}
+
+.book-search-plugin__settings .bsp-source-heading .setting-item-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.book-search-plugin__settings .bsp-status {
+  padding: 0 var(--size-4-2);
+  border-radius: var(--radius-l);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.book-search-plugin__settings .bsp-status--ready,
+.book-search-plugin__settings .bsp-status--set {
+  background-color: rgba(var(--color-green-rgb), 0.14);
+  color: var(--color-green);
+}
+
+.book-search-plugin__settings .bsp-status--optional {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+
+.book-search-plugin__settings .bsp-status--needed {
+  background-color: rgba(var(--color-orange-rgb), 0.14);
+  color: var(--color-orange);
+}
+
+/* ── Settings: step-by-step guides ─────────────────────────────────────── */
+.book-search-plugin__settings .bsp-guide {
+  margin: var(--size-4-1) 0 var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.book-search-plugin__settings .bsp-guide > summary {
+  color: var(--text-accent);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+}
+
+.book-search-plugin__settings .bsp-guide[open] > summary {
+  margin-bottom: var(--size-4-2);
+}
+
+.book-search-plugin__settings .bsp-guide ol {
+  margin: 0;
+  padding-inline-start: 1.4em;
+}
+
+.book-search-plugin__settings .bsp-guide li {
+  margin: var(--size-4-1) 0;
+  line-height: 1.55;
+}
+
+.book-search-plugin__settings .bsp-guide p {
+  margin: var(--size-4-2) 0 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.book-search-plugin__settings .bsp-guide code {
+  font-size: 0.95em;
+}
+
+.book-search-plugin__settings .bsp-guide ul {
+  margin: var(--size-4-1) 0 0;
+  padding-inline-start: 1.2em;
+}
+
+/* ── Settings: support tab ─────────────────────────────────────────────── */
+.book-search-plugin__settings .bsp-support {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin: var(--size-4-4) 0 var(--size-4-2);
+  padding: var(--size-4-6) var(--size-4-4);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  background-color: var(--background-secondary);
+  text-align: center;
+}
+
+.book-search-plugin__settings .bsp-support-icon {
+  display: inline-flex;
+  color: var(--color-red);
+}
+
+.book-search-plugin__settings .bsp-support-icon svg {
+  width: 36px;
+  height: 36px;
+  fill: currentColor;
+}
+
+.book-search-plugin__settings .bsp-support-title {
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.book-search-plugin__settings .bsp-support p {
+  max-width: 34em;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.55;
+}
+
+.book-search-plugin__settings .bsp-support-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-4);
+  border-radius: var(--radius-m);
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: var(--font-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.book-search-plugin__settings .bsp-support-button:hover {
+  background-color: var(--interactive-accent-hover);
+  color: var(--text-on-accent);
+}
+
+.book-search-plugin__settings .bsp-support-button-icon {
+  display: inline-flex;
+}
+
+.book-search-plugin__settings .bsp-support-button-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
 }

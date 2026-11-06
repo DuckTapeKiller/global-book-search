@@ -3,6 +3,7 @@ import { Book } from "@models/book.model";
 import { DEFAULT_SETTINGS } from "@settings/settings";
 import { ServiceProvider } from "@src/constants";
 import BookSearchPlugin from "@src/main";
+import { ProviderBlockedError } from "@utils/http";
 import languages from "@utils/languages";
 import {
   ButtonComponent,
@@ -76,6 +77,11 @@ export class BookSearchModal extends Modal {
       this.callback(null, searchResults);
       this.close();
     } catch (err) {
+      if (err instanceof ProviderBlockedError) {
+        // Keep the modal open, as for an empty result, and explain.
+        new Notice(err.message, 10_000);
+        return;
+      }
       this.callback(err as Error);
       this.close();
     } finally {

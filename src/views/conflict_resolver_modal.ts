@@ -1,17 +1,11 @@
 import { Modal, App, Setting } from "obsidian";
 import { EnrichmentResult } from "@models/accuracy.model";
 import { Book } from "@models/book.model";
-
-/** Render a conflict field value for display/comparison without "[object Object]". */
-function displayValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) return value.map((v) => displayValue(v)).join(", ");
-  return "";
-}
+import {
+  comparableValue,
+  displayValue,
+  groupConflictValues,
+} from "@utils/conflicts";
 
 export class ConflictResolverModal extends Modal {
   private resolvedBook: Book;
@@ -52,7 +46,10 @@ export class ConflictResolverModal extends Modal {
         cls: "conflict-options",
       });
 
-      conflict.values.forEach((v, idx) => {
+      const current = comparableValue(
+        this.resolvedBook[conflict.fieldName as keyof Book],
+      );
+      groupConflictValues(conflict.values).forEach((choice, idx) => {
         const optionId = `conflict-${conflict.fieldName}-${idx}`;
         const optionEl = optionsContainer.createDiv({
           cls: "conflict-option-card",
@@ -66,18 +63,13 @@ export class ConflictResolverModal extends Modal {
           },
         });
 
-        // Pre-select quorum or current value
-        if (
-          displayValue(v.value) ===
-          displayValue(this.resolvedBook[conflict.fieldName as keyof Book])
-        ) {
-          radio.checked = true;
-        }
+        // Pre-select the value the merge chose.
+        if (comparableValue(choice.value) === current) radio.checked = true;
 
         radio.addEventListener("change", () => {
           (this.resolvedBook as unknown as Record<string, unknown>)[
             conflict.fieldName
-          ] = v.value;
+          ] = choice.value;
           optionsContainer
             .querySelectorAll(".conflict-option-card")
             .forEach((el) => el.removeClass("is-selected"));
@@ -87,11 +79,17 @@ export class ConflictResolverModal extends Modal {
         if (radio.checked) optionEl.addClass("is-selected");
 
         const label = optionEl.createEl("label", { attr: { for: optionId } });
-        label.createDiv({ text: displayValue(v.value), cls: "value-text" });
+        label.createDiv({
+          text: displayValue(choice.value),
+          cls: "value-text",
+        });
 
         const sourceRow = label.createDiv({ cls: "source-row" });
-        sourceRow.createSpan({ text: v.source, cls: "source-name" });
-        if (v.isQuorum) {
+        sourceRow.createSpan({
+          text: choice.sources.join(" · "),
+          cls: "source-name",
+        });
+        if (choice.isQuorum) {
           sourceRow.createSpan({ text: "Most Frequent", cls: "quorum-tag" });
         }
       });

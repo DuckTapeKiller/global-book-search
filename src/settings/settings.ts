@@ -6,6 +6,7 @@ import {
   PluginSettingTab,
   SecretComponent,
   Setting,
+  setIcon,
 } from "obsidian";
 
 // SecretComponent / app.secretStorage only exist on newer Obsidian; gate on both.
@@ -18,7 +19,6 @@ function secretStorageAvailable(app: App): boolean {
 
 import { GLOBAL_SEARCH_SOURCE_LABELS, ServiceProvider } from "@src/constants";
 import languages from "@utils/languages";
-import { SettingServiceProviderModal } from "@views/setting_service_provider_modal";
 import BookSearchPlugin from "../main";
 import { FileNameFormatSuggest } from "./suggesters/FileNameFormatSuggester";
 import { FileSuggest } from "./suggesters/FileSuggester";
@@ -57,6 +57,10 @@ export interface BookSearchPluginSettings {
   apiKey: string;
   hardcoverApiToken: string; // Hardcover personal API token (Account → API)
   librarythingApiKey: string; // LibraryThing developer key (services API)
+  // StoryGraph login: the user's own browser cookies (secret names when
+  // SecretStorage holds them). StoryGraph answers only signed-in requests.
+  storygraphSessionCookie: string; // _storygraph_session
+  storygraphRememberToken: string; // remember_user_token
   openPageOnCompletion: boolean;
   showCoverImageInSearch: boolean;
   enableCoverImageEdgeCurl: boolean;
@@ -70,7 +74,7 @@ export interface BookSearchPluginSettings {
   searchHistory: string[]; // Last 10 searches
   maxSearchHistory: number; // How many to keep
   enableSeriesLinking: boolean; // Add series links automatically
-  showTemplatePreview: boolean; // Preview note before creation
+  showTemplatePreview: boolean; // Unused: no preview exists; kept so saved settings load unchanged
   showIndividualServiceButtons: boolean; // Show all providers in selection modal
   authorTagPrefix: string;
   titleTagPrefix: string;
@@ -331,6 +335,8 @@ export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
   apiKey: "",
   hardcoverApiToken: "",
   librarythingApiKey: "",
+  storygraphSessionCookie: "",
+  storygraphRememberToken: "",
   openPageOnCompletion: true,
   showCoverImageInSearch: true,
   enableCoverImageEdgeCurl: true,
@@ -429,13 +435,84 @@ function absTime(ms: number | undefined): string {
   return new Date(ms).toISOString().replace("T", " ").slice(0, 19) + " UTC";
 }
 
+// ── Settings layout ───────────────────────────────────────────────────────
+type SettingsTabId = "notes" | "sources" | "search" | "diagnostics" | "support";
+
+const KOFI_URL = "https://ko-fi.com/ducktapekiller";
+
+const SETTINGS_TABS: ReadonlyArray<{
+  id: SettingsTabId;
+  label: string;
+  icon: string;
+  intro: string;
+}> = [
+  {
+    id: "notes",
+    label: "Notes",
+    icon: "file-text",
+    intro: "Where new book notes go and what they contain.",
+  },
+  {
+    id: "sources",
+    label: "Sources",
+    icon: "library",
+    intro:
+      "Where book data comes from. Goodreads and Open Library need no setup; the others need a key or a login, and each one explains how to get it.",
+  },
+  {
+    id: "search",
+    label: "Search & merging",
+    icon: "search",
+    intro:
+      "What happens before a note is created, and which source wins when sources disagree.",
+  },
+  {
+    id: "diagnostics",
+    label: "Diagnostics",
+    icon: "activity",
+    intro:
+      "Network behaviour, and how each source has performed over the last three days.",
+  },
+  {
+    id: "support",
+    label: "Support",
+    icon: "heart",
+    intro: "Ways to support Global Book Search, and where to get help.",
+  },
+];
+
+/**
+ * A run of text for descriptions and guides: plain, code, bold, a link, or a
+ * bulleted sub-list.
+ */
+type Rich =
+  | string
+  | { code: string }
+  | { strong: string }
+  | { link: string; href: string }
+  | { list: readonly (readonly Rich[])[] };
+
+function appendRich(el: HTMLElement, parts: readonly Rich[]): void {
+  for (const part of parts) {
+    if (typeof part === "string") el.appendText(part);
+    else if ("code" in part) el.createEl("code", { text: part.code });
+    else if ("strong" in part) el.createEl("strong", { text: part.strong });
+    else if ("list" in part) {
+      const list = el.createEl("ul");
+      for (const item of part.list) appendRich(list.createEl("li"), item);
+    } else el.createEl("a", { text: part.link, href: part.href });
+  }
+}
+
+/** The label beside a source's name: ready, saved, optional or still needed. */
+type SourceStatus = {
+  kind: "ready" | "set" | "optional" | "needed";
+  text: string;
+};
+
 export class BookSearchSettingTab extends PluginSettingTab {
-  private serviceProviderExtraSettingButton: HTMLElement | null = null;
-  private preferredLocaleDropdownSetting: Setting | null = null;
-  private coverImageEdgeCurlToggleSetting: Setting | null = null;
-  private calibreServerUrlSetting: Setting | null = null;
-  private calibreLibraryIdSetting: Setting | null = null;
-  private calibreSettingsHeader: Setting | null = null;
+  /** The tab shown; kept while the settings window stays open. */
+  private activeTab: SettingsTabId = "notes";
 
   constructor(
     app: App,
@@ -628,114 +705,75 @@ export class BookSearchSettingTab extends PluginSettingTab {
       });
   }
 
-  private createShowTemplatePreviewSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Show template preview")
-      .setDesc("Preview the rendered note before creating it.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.showTemplatePreview)
-          .onChange((value) => {
-            this.plugin.settings.showTemplatePreview = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
+  /** Heading for one source, with its status label and a short description. */
+  private createSourceHeading(
+    containerEl: HTMLElement,
+    name: string,
+    status: SourceStatus,
+    description: readonly Rich[],
+  ): void {
+    const setting = new Setting(containerEl).setHeading().setName(name);
+    setting.settingEl.addClass("bsp-source-heading");
+    setting.nameEl.createSpan({
+      cls: `bsp-status bsp-status--${status.kind}`,
+      text: status.text,
+    });
+    appendRich(setting.descEl, description);
   }
 
-  private createServiceProviderSetting(containerEl: HTMLElement) {
+  /** A collapsible step-by-step guide, closed until the reader opens it. */
+  private createGuide(
+    containerEl: HTMLElement,
+    summary: string,
+    steps: readonly (readonly Rich[])[],
+    notes: readonly (readonly Rich[])[] = [],
+  ): void {
+    const details = containerEl.createEl("details", { cls: "bsp-guide" });
+    details.createEl("summary", { text: summary });
+    const list = details.createEl("ol");
+    for (const step of steps) appendRich(list.createEl("li"), step);
+    for (const note of notes) appendRich(details.createEl("p"), note);
+  }
+
+  private createDefaultSourceSetting(containerEl: HTMLElement) {
+    const options: ReadonlyArray<[ServiceProvider, string]> = [
+      [ServiceProvider.google, "Google Books"],
+      [ServiceProvider.goodreads, "Goodreads"],
+      [ServiceProvider.openlibrary, "Open Library"],
+      [ServiceProvider.storygraph, "StoryGraph (needs your login)"],
+      [ServiceProvider.hardcover, "Hardcover (needs a token)"],
+      [ServiceProvider.librarything, "LibraryThing (needs a key)"],
+      [ServiceProvider.calibre, "Calibre (your library)"],
+    ];
     new Setting(containerEl)
-      .setName("Service provider")
+      .setName("Default source")
       .setDesc(
-        "Choose the service provider you want to use to search your books.",
+        "The source searched by the Create new book note and Insert the metadata commands. The ribbon button lets you choose each time.",
       )
-      .setClass("book-search-plugin__settings--service_provider")
       .addDropdown((dropDown) => {
-        dropDown.addOption(
-          ServiceProvider.google,
-          `${ServiceProvider.google} (Global)`,
-        );
-        dropDown.addOption(
-          ServiceProvider.goodreads,
-          `${ServiceProvider.goodreads} (Scraping)`,
-        );
-        dropDown.addOption(
-          ServiceProvider.calibre,
-          `${ServiceProvider.calibre} (Local Server)`,
-        );
-        dropDown.addOption(
-          ServiceProvider.openlibrary,
-          `${ServiceProvider.openlibrary} (Public API)`,
-        );
-        dropDown.addOption(
-          ServiceProvider.storygraph,
-          `${ServiceProvider.storygraph} (Scraping)`,
-        );
-        dropDown.addOption(
-          ServiceProvider.hardcover,
-          `${ServiceProvider.hardcover} (API token)`,
-        );
-        dropDown.addOption(
-          ServiceProvider.librarything,
-          `${ServiceProvider.librarything} (Scraping)`,
-        );
-        dropDown.setValue(
-          this.plugin.settings?.serviceProvider ?? ServiceProvider.google,
-        );
-        dropDown.onChange((value) => {
-          const newValue = value as ServiceProvider;
-          this.toggleServiceProviderExtraSettings(newValue);
-          this.plugin.settings["serviceProvider"] = newValue;
-          void this.plugin.saveSettings().catch((err) => console.warn(err));
-        });
-      })
-      .addExtraButton((component) => {
-        this.serviceProviderExtraSettingButton = component.extraSettingsEl;
-        component.onClick(() => {
-          new SettingServiceProviderModal(this.plugin).open();
-        });
+        for (const [id, label] of options) dropDown.addOption(id, label);
+        dropDown
+          .setValue(
+            this.plugin.settings.serviceProvider ?? ServiceProvider.google,
+          )
+          .onChange((value) => {
+            this.plugin.settings.serviceProvider = value as ServiceProvider;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          });
       });
+  }
 
-    this.calibreSettingsHeader = this.createHeader(
-      "Calibre settings",
-      containerEl,
-    );
-
-    this.calibreServerUrlSetting = new Setting(containerEl)
-      .setName("Calibre server URL")
-      .setDesc("Enter the URL of your Calibre content server.")
-      .addText((text) =>
-        text
-          .setPlaceholder("http://localhost:8080")
-          .setValue(this.plugin.settings.calibreServerUrl)
-          .onChange((value) => {
-            this.plugin.settings.calibreServerUrl = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-
-    this.calibreLibraryIdSetting = new Setting(containerEl)
-      .setName("Calibre library ID")
+  private createPreferredLocaleSetting(containerEl: HTMLElement) {
+    new Setting(containerEl)
+      .setName("Preferred language")
       .setDesc(
-        "Enter the library ID (default: calibre). This is usually the folder name of your library.",
+        "Language of the results from Google Books, Hardcover and LibraryThing.",
       )
-      .addText((text) =>
-        text
-          .setPlaceholder("calibre")
-          .setValue(this.plugin.settings.calibreLibraryId)
-          .onChange((value) => {
-            this.plugin.settings.calibreLibraryId = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-
-    this.preferredLocaleDropdownSetting = new Setting(containerEl)
-      .setName("Preferred locale")
-      .setDesc("Sets the preferred locale to use when searching for books.")
       .addDropdown((dropDown) => {
         const defaultLocale = window.moment.locale();
         dropDown.addOption(
           defaultLocale,
-          `${languages[defaultLocale] || defaultLocale} (Default Locale)`,
+          `Same as Obsidian: ${languages[defaultLocale] || defaultLocale}`,
         );
         Object.keys(languages).forEach((locale) => {
           const localeName = (languages as Record<string, string>)[locale];
@@ -750,17 +788,16 @@ export class BookSearchSettingTab extends PluginSettingTab {
               : localeValue,
           )
           .onChange((value) => {
-            const newValue = value;
-            this.plugin.settings.localePreference = newValue;
+            this.plugin.settings.localePreference = value;
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           });
       });
+  }
 
+  private createOpenNoteSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
-      .setName("Open new book note")
-      .setDesc(
-        "Enable or disable the automatic opening of the note on creation.",
-      )
+      .setName("Open new book notes")
+      .setDesc("Open each new book note as soon as it is created.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.openPageOnCompletion)
@@ -769,37 +806,12 @@ export class BookSearchSettingTab extends PluginSettingTab {
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           }),
       );
-
-    this.coverImageEdgeCurlToggleSetting = new Setting(containerEl)
-      .setName("Enable cover image edge curl effect")
-      .setDesc("Toggle to show or hide page curl effect in cover images.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableCoverImageEdgeCurl)
-          .onChange((value) => {
-            this.plugin.settings.enableCoverImageEdgeCurl = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-
-    // A toggle whether or not to ask for the locale every time a search is made
-    new Setting(containerEl)
-      .setName("Ask for locale")
-      .setDesc(
-        "Toggle to enable or disable asking for the locale every time a search is made.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.askForLocale).onChange((value) => {
-          this.plugin.settings.askForLocale = value;
-          void this.plugin.saveSettings().catch((err) => console.warn(err));
-        }),
-      );
   }
 
   private createShowCoverImageInSearchSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
       .setName("Show cover images in search")
-      .setDesc("Toggle to show or hide cover images in the search results.")
+      .setDesc("Show book covers in the list of search results.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.showCoverImageInSearch)
@@ -810,129 +822,441 @@ export class BookSearchSettingTab extends PluginSettingTab {
       );
   }
 
-  private createGoogleApiSettings(containerEl: HTMLElement) {
-    const googleSetting = new Setting(containerEl).setName(
-      "Google API settings",
+  private createNoSetupSources(containerEl: HTMLElement) {
+    this.createSourceHeading(
+      containerEl,
+      "Goodreads",
+      { kind: "ready", text: "No setup" },
+      [
+        "Works as it is. When Goodreads blocks a book page, the plugin tries other routes and archived copies, so a note can occasionally miss a field such as the publisher.",
+      ],
     );
-    const googleDesc = googleSetting.descEl;
-    googleDesc.createEl("div", {
-      text: "If you get 'Request Failed, status 429', it means you have reached the daily limit of the shared API key.",
-    });
-    googleDesc.createEl("div", {
-      text: "Please create your own Google Books API key at ",
-    });
-    googleDesc.createEl("a", {
-      text: "Google Cloud Console",
-      href: "https://console.cloud.google.com/apis/credentials",
-    });
-    googleDesc.createEl("span", { text: " and paste it below." });
+    this.createSourceHeading(
+      containerEl,
+      "Open Library",
+      { kind: "ready", text: "No setup" },
+      ["Works as it is."],
+    );
+  }
 
+  private createGoogleApiSettings(containerEl: HTMLElement) {
+    const hasKey = this.plugin.settings.apiKey.length > 0;
+    this.createSourceHeading(
+      containerEl,
+      "Google Books",
+      hasKey
+        ? { kind: "set", text: "Own key saved" }
+        : { kind: "optional", text: "Key optional" },
+      [
+        "Works without setup, but the free quota it shares with every user often runs out (HTTP 429). Your own free API key avoids that.",
+      ],
+    );
+
+    let pendingKey = "";
     new Setting(containerEl)
-      .setName("Status check")
+      .setName("API key")
       .setDesc(
-        "Check whether API key is saved. It does not guarantee that the API key is valid or invalid.",
+        hasKey
+          ? "A key is saved. It is not shown again; save a new one to replace it, or save an empty field to remove it."
+          : "No key saved; the shared quota is used.",
       )
-      .addButton((button) => {
-        button.setButtonText("API check").onClick(() => {
-          if (this.plugin.settings.apiKey.length) {
-            new Notice("API key exists.");
-          } else {
-            new Notice("API key does not exist.");
-          }
-        });
-      });
-
-    let tempKeyValue = "";
-    const apiKeySetting = new Setting(containerEl).setName("Set API key");
-    apiKeySetting.descEl.createDiv({ text: "Set your Books API key." });
-    apiKeySetting.descEl.createDiv({
-      text: "For security reason, saved API key is not shown in this textarea after saved.",
-    });
-    apiKeySetting
       .addText((text) => {
         text.inputEl.type = "password";
-        text.setValue("").onChange((value) => {
-          tempKeyValue = value;
-        });
+        text
+          .setPlaceholder("AIza…")
+          .onChange((value) => (pendingKey = value.trim()));
       })
-      .addButton((button) => {
+      .addButton((button) =>
         button.setButtonText("Save key").onClick(() => {
-          this.plugin.settings.apiKey = tempKeyValue;
-          void this.plugin
-            .saveSettings()
-            .then(() => new Notice("API key saved"));
-        });
+          this.plugin.settings.apiKey = pendingKey;
+          void this.plugin.saveSettings().then(() => {
+            new Notice(
+              pendingKey
+                ? "Google Books API key saved"
+                : "Google Books API key removed",
+            );
+            this.display();
+          });
+        }),
+      );
+
+    this.createGuide(containerEl, "How to get a free Google Books API key", [
+      [
+        "Open ",
+        {
+          link: "Google Cloud Console",
+          href: "https://console.cloud.google.com/",
+        },
+        " and choose or create a project.",
+      ],
+      [
+        "Go to ",
+        { strong: "APIs & Services → Library" },
+        ", search for ",
+        { strong: "Books API" },
+        " and enable it.",
+      ],
+      [
+        "Go to ",
+        { strong: "APIs & Services → Credentials" },
+        " and choose ",
+        { strong: "Create credentials → API key" },
+        ".",
+      ],
+      ["Copy the key, paste it above and press ", { strong: "Save key" }, "."],
+    ]);
+
+    new Setting(containerEl)
+      .setName("Ask for the language on each search")
+      .setDesc("Show a language menu in the Google Books search window.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.askForLocale).onChange((value) => {
+          this.plugin.settings.askForLocale = value;
+          void this.plugin.saveSettings().catch((err) => console.warn(err));
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Page-curl effect on covers")
+      .setDesc("Ask Google Books for covers with a curled page corner.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.enableCoverImageEdgeCurl)
+          .onChange((value) => {
+            this.plugin.settings.enableCoverImageEdgeCurl = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
+  }
+
+  /**
+   * A secret field (Obsidian's secret storage) or, on Obsidian versions
+   * without it, a password field. `test` adds a button that reports on it.
+   */
+  private createSecretSetting(
+    containerEl: HTMLElement,
+    name: string,
+    description: string,
+    key: "hardcoverApiToken" | "librarythingApiKey",
+    placeholder: string,
+    test: () => Promise<string>,
+  ) {
+    const setting = new Setting(containerEl).setName(name).setDesc(description);
+    if (secretStorageAvailable(this.app)) {
+      setting.addComponent((el) =>
+        new SecretComponent(this.app, el)
+          .setValue(this.plugin.settings[key])
+          .onChange((value) => {
+            this.plugin.settings[key] = value;
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          }),
+      );
+    } else {
+      setting.addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder(placeholder)
+          .setValue(this.plugin.settings[key])
+          .onChange((value) => {
+            this.plugin.settings[key] = value.trim();
+            void this.plugin.saveSettings().catch((err) => console.warn(err));
+          });
       });
+    }
+    setting.addButton((button) =>
+      button.setButtonText("Test").onClick(() => {
+        button.setDisabled(true);
+        void test()
+          .then((report) => new Notice(`${name}:\n${report}`, 60_000))
+          .finally(() => button.setDisabled(false));
+      }),
+    );
   }
 
   private createHardcoverApiSettings(containerEl: HTMLElement) {
-    const setting = new Setting(containerEl).setName("Hardcover API token");
-    setting.descEl.appendText(
-      "Required to use the Hardcover provider. Get a personal token at ",
+    this.createSourceHeading(
+      containerEl,
+      "Hardcover",
+      this.plugin.settings.hardcoverApiToken
+        ? { kind: "set", text: "Token saved" }
+        : { kind: "needed", text: "Needs a token" },
+      ["Hardcover's official API, used with your personal token."],
     );
-    setting.descEl.createEl("a", {
-      text: "hardcover.app/account/api",
-      href: "https://hardcover.app/account/api",
-    });
-    setting.descEl.appendText(
-      " (Account → API). Stored securely in Obsidian's secret storage.",
+    this.createSecretSetting(
+      containerEl,
+      "Hardcover token",
+      "Kept in Obsidian's secret storage.",
+      "hardcoverApiToken",
+      "eyJhbGci…",
+      () => this.plugin.checkHardcover(),
     );
-    if (secretStorageAvailable(this.app)) {
-      setting.addComponent((el) =>
-        new SecretComponent(this.app, el)
-          .setValue(this.plugin.settings.hardcoverApiToken)
-          .onChange((value) => {
-            this.plugin.settings.hardcoverApiToken = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-    } else {
-      setting.addText((text) => {
-        text.inputEl.type = "password";
-        text
-          .setPlaceholder("eyJhbGci…")
-          .setValue(this.plugin.settings.hardcoverApiToken)
-          .onChange((value) => {
-            this.plugin.settings.hardcoverApiToken = value.trim();
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-    }
+    this.createGuide(containerEl, "How to get your Hardcover token", [
+      [
+        "Sign in at ",
+        { link: "hardcover.app", href: "https://hardcover.app" },
+        ".",
+      ],
+      [
+        "Open ",
+        {
+          link: "hardcover.app/account/api",
+          href: "https://hardcover.app/account/api",
+        },
+        " (Account → API) and copy the token. It works with or without the word ",
+        { code: "Bearer" },
+        " in front.",
+      ],
+      [
+        "Click ",
+        { strong: "Link…" },
+        " above, create a secret and paste the token into it.",
+      ],
+      ["Press ", { strong: "Test" }, "."],
+    ]);
   }
 
   private createLibraryThingApiSettings(containerEl: HTMLElement) {
-    const setting = new Setting(containerEl).setName("LibraryThing API key");
-    setting.descEl.appendText(
-      "Developer key for the LibraryThing services API. Request one at ",
+    this.createSourceHeading(
+      containerEl,
+      "LibraryThing",
+      this.plugin.settings.librarythingApiKey
+        ? { kind: "set", text: "Key saved" }
+        : { kind: "needed", text: "Needs a key" },
+      [
+        "LibraryThing's services API, used with your developer key. It also fills the Common Knowledge variables such as ",
+        { code: "{{characters}}" },
+        " and ",
+        { code: "{{places}}" },
+        ".",
+      ],
     );
-    setting.descEl.createEl("a", {
-      text: "librarything.com/services/keys.php",
-      href: "https://www.librarything.com/services/keys.php",
-    });
-    setting.descEl.appendText(
-      ". Stored securely in Obsidian's secret storage.",
+    this.createSecretSetting(
+      containerEl,
+      "LibraryThing developer key",
+      "Kept in Obsidian's secret storage.",
+      "librarythingApiKey",
+      "developer key",
+      () => this.plugin.checkLibraryThing(),
     );
-    if (secretStorageAvailable(this.app)) {
-      setting.addComponent((el) =>
-        new SecretComponent(this.app, el)
-          .setValue(this.plugin.settings.librarythingApiKey)
+    this.createGuide(
+      containerEl,
+      "How to get a LibraryThing developer key",
+      [
+        ["Sign in to LibraryThing; a free account is enough."],
+        [
+          "Open ",
+          {
+            link: "librarything.com/services/keys.php",
+            href: "https://www.librarything.com/services/keys.php",
+          },
+          " and copy your developer key.",
+        ],
+        [
+          "Click ",
+          { strong: "Link…" },
+          " above, create a secret and paste the key into it.",
+        ],
+        ["Press ", { strong: "Test" }, "."],
+      ],
+      [
+        [
+          'LibraryThing sometimes answers automated requests for its book pages with a "High traffic" page. The Common Knowledge variables can then come out empty.',
+        ],
+      ],
+    );
+  }
+
+  private createStoryGraphLoginSettings(containerEl: HTMLElement) {
+    const saved =
+      !!this.plugin.settings.storygraphSessionCookie ||
+      !!this.plugin.settings.storygraphRememberToken;
+    this.createSourceHeading(
+      containerEl,
+      "StoryGraph",
+      saved
+        ? { kind: "set", text: "Login saved" }
+        : { kind: "needed", text: "Needs your login" },
+      [
+        "StoryGraph has no public API and answers only signed-in requests, so the plugin uses your own login: two cookies from your browser.",
+      ],
+    );
+
+    if (!secretStorageAvailable(this.app)) {
+      new Setting(containerEl).setDesc(
+        "The login needs Obsidian's secret storage, which this version of Obsidian does not have. Update Obsidian to use StoryGraph.",
+      );
+      return;
+    }
+
+    const cookieSetting = (
+      name: string,
+      cookie: string,
+      key: "storygraphSessionCookie" | "storygraphRememberToken",
+    ) =>
+      new Setting(containerEl)
+        .setName(name)
+        .setDesc(`The value of the ${cookie} cookie.`)
+        .addComponent((el) =>
+          new SecretComponent(this.app, el)
+            .setValue(this.plugin.settings[key])
+            .onChange((value) => {
+              this.plugin.settings[key] = value;
+              void this.plugin.saveSettings().catch((err) => console.warn(err));
+            }),
+        );
+    cookieSetting(
+      "Session cookie",
+      "_storygraph_session",
+      "storygraphSessionCookie",
+    );
+    cookieSetting(
+      "Remember-me cookie",
+      "remember_user_token",
+      "storygraphRememberToken",
+    );
+
+    new Setting(containerEl)
+      .setName("Check the login")
+      .setDesc("Runs one test search on StoryGraph with the saved login.")
+      .addButton((button) =>
+        button.setButtonText("Test login").onClick(() => {
+          button.setDisabled(true);
+          void this.plugin
+            .checkStoryGraphLogin()
+            .then((message) => new Notice(message, 15_000))
+            .finally(() => button.setDisabled(false));
+        }),
+      );
+
+    this.createGuide(
+      containerEl,
+      "How to get your StoryGraph login (about two minutes, on a computer)",
+      [
+        [
+          "Sign in at ",
+          {
+            link: "app.thestorygraph.com",
+            href: "https://app.thestorygraph.com",
+          },
+          " with ",
+          { strong: "Remember me" },
+          " ticked.",
+        ],
+        [
+          "Open the developer tools and find the cookies:",
+          {
+            list: [
+              [
+                { strong: "Chrome, Edge or Brave:" },
+                " press Cmd+Option+I (Mac) or F12, then open ",
+                {
+                  strong:
+                    "Application → Cookies → https://app.thestorygraph.com",
+                },
+                ".",
+              ],
+              [
+                { strong: "Firefox:" },
+                " press Cmd+Option+I (Mac) or F12, then open ",
+                { strong: "Storage → Cookies → https://app.thestorygraph.com" },
+                ".",
+              ],
+              [
+                { strong: "Safari:" },
+                " turn on ",
+                {
+                  strong:
+                    "Settings → Advanced → Show features for web developers",
+                },
+                ", then open ",
+                { strong: "Develop → Show Web Inspector → Storage → Cookies" },
+                ".",
+              ],
+            ],
+          },
+        ],
+        [
+          "Copy the value of ",
+          { code: "_storygraph_session" },
+          " and the value of ",
+          { code: "remember_user_token" },
+          ".",
+        ],
+        [
+          "For each one, click ",
+          { strong: "Link…" },
+          " above, create a secret and paste the value into it.",
+        ],
+        ["Press ", { strong: "Test login" }, "."],
+      ],
+      [
+        [
+          { strong: "Treat these values like your password:" },
+          " anyone who has them can use your StoryGraph account. They stay in Obsidian's secret storage (Settings → Keychain), not in your vault's files, and the plugin sends them only to app.thestorygraph.com.",
+        ],
+        [
+          "When StoryGraph stops accepting them (they expire, or you sign out everywhere), the plugin says so; repeat these steps. StoryGraph can change how it treats unofficial clients like this one at any time.",
+        ],
+      ],
+    );
+  }
+
+  private createCalibreSettings(containerEl: HTMLElement) {
+    this.createSourceHeading(
+      containerEl,
+      "Calibre",
+      { kind: "optional", text: "Your library" },
+      [
+        "Search and import from your own Calibre library, through Calibre's content server.",
+      ],
+    );
+    new Setting(containerEl)
+      .setName("Server address")
+      .setDesc("Where Calibre's content server listens.")
+      .addText((text) =>
+        text
+          .setPlaceholder("http://localhost:8080")
+          .setValue(this.plugin.settings.calibreServerUrl)
           .onChange((value) => {
-            this.plugin.settings.librarythingApiKey = value;
+            this.plugin.settings.calibreServerUrl = value
+              .trim()
+              .replace(/\/+$/, "");
             void this.plugin.saveSettings().catch((err) => console.warn(err));
           }),
       );
-    } else {
-      setting.addText((text) => {
-        text.inputEl.type = "password";
+    new Setting(containerEl)
+      .setName("Library ID")
+      .setDesc("Usually the folder name of your library.")
+      .addText((text) =>
         text
-          .setPlaceholder("developer key")
-          .setValue(this.plugin.settings.librarythingApiKey)
+          .setPlaceholder("calibre")
+          .setValue(this.plugin.settings.calibreLibraryId)
           .onChange((value) => {
-            this.plugin.settings.librarythingApiKey = value.trim();
+            this.plugin.settings.calibreLibraryId = value.trim();
             void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-    }
+          }),
+      );
+    this.createGuide(containerEl, "How to turn on Calibre's content server", [
+      [
+        "In Calibre, choose ",
+        { strong: "Connect/share → Start Content server" },
+        ".",
+      ],
+      [
+        "To have it start with Calibre, open ",
+        { strong: "Preferences → Sharing over the net" },
+        " and tick ",
+        { strong: "Run server automatically when calibre starts" },
+        ".",
+      ],
+      [
+        "On the same computer the address is ",
+        { code: "http://localhost:8080" },
+        ". From a phone or another computer, use this computer's network address instead, such as ",
+        { code: "http://192.168.1.50:8080" },
+        ".",
+      ],
+    ]);
   }
 
   private createWarnOnDuplicateSetting(containerEl: HTMLElement) {
@@ -955,7 +1279,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Enable series linking")
       .setDesc(
-        "Automatically add series information and links (e.g., [[Series Name]]) to book notes.",
+        "Fill {{seriesLink}} with a [[wikilink]] to the book's series. {{series}} and {{seriesNumber}} are always available. Add the ones you want to your template.",
       )
       .addToggle((toggle) =>
         toggle
@@ -1003,10 +1327,9 @@ export class BookSearchSettingTab extends PluginSettingTab {
 
   private createShowIndividualServiceButtonsSetting(containerEl: HTMLElement) {
     new Setting(containerEl)
-      .setName("Show individual service buttons")
+      .setName("A button for each source")
       .setDesc(
-        "Show Goodreads, Google Books, OpenLibrary, and StoryGraph as separate buttons " +
-          "in the search modal. When off, only Global Search and Calibre are shown.",
+        "Add Goodreads, Open Library, StoryGraph, Google Books, LibraryThing and Hardcover buttons to the window the ribbon button opens. Global Search, Calibre and Bulk Import are always there.",
       )
       .addToggle((toggle) =>
         toggle
@@ -1036,7 +1359,9 @@ export class BookSearchSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("HTTP cache")
-      .setDesc("Cache GET responses in-memory to speed up repeated searches.")
+      .setDesc(
+        "Cache GET responses in-memory to speed up repeated searches. Clearing also ends the pause on a source that was blocking requests.",
+      )
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.httpCacheEnabled)
@@ -1123,11 +1448,9 @@ export class BookSearchSettingTab extends PluginSettingTab {
       { id: "calibre", label: "Calibre" },
     ];
 
-    new Setting(containerEl)
-      .setName("Service performance (last 3 days)")
-      .setDesc(
-        "Reliability of each book source. Hover a dot for details; use “Copy report” when filing an issue.",
-      );
+    new Setting(containerEl).setDesc(
+      "Reliability of each source over the last three days. Hover a dot for that day's details; use Copy report when filing an issue.",
+    );
 
     const wrap = containerEl.createDiv({ cls: "bsp-perf-wrap" });
     for (const svc of services) {
@@ -1299,24 +1622,24 @@ export class BookSearchSettingTab extends PluginSettingTab {
       { id: "loc", label: "Library of Congress (passive)" },
     ];
 
+    containerEl.createEl("p", {
+      cls: "bsp-section-note",
+      text: "When several sources have a value for a field, the one chosen here wins. Fable and the Library of Congress are consulted only for fields where you choose them.",
+    });
+
     fields.forEach(({ field, label }) => {
       const currentTop =
         this.plugin.settings.fieldSourcePreferences?.[field]?.[0] || "primary";
 
-      new Setting(containerEl)
-        .setName(`${label} — preferred source`)
-        .setDesc(
-          "Controls which provider wins when multiple values are available.",
-        )
-        .addDropdown((dropdown) => {
-          sources.forEach((s) => {
-            dropdown.addOption(s.id, s.label);
-          });
-          dropdown.setValue(currentTop).onChange((value) => {
-            this.movePreferenceToFront(field, value);
-            void this.plugin.saveSettings();
-          });
+      new Setting(containerEl).setName(label).addDropdown((dropdown) => {
+        sources.forEach((s) => {
+          dropdown.addOption(s.id, s.label);
         });
+        dropdown.setValue(currentTop).onChange((value) => {
+          this.movePreferenceToFront(field, value);
+          void this.plugin.saveSettings();
+        });
+      });
     });
   }
 
@@ -1361,100 +1684,6 @@ export class BookSearchSettingTab extends PluginSettingTab {
       });
   }
 
-  private toggleServiceProviderExtraSettings(
-    serviceProvider: ServiceProvider = this.plugin.settings?.serviceProvider,
-  ) {
-    if (serviceProvider === ServiceProvider.goodreads) {
-      this.hideServiceProviderExtraSettingButton();
-      this.showServiceProviderExtraSettingDropdown();
-      this.showCoverImageEdgeCurlToggle();
-      this.hideCalibreSettings();
-    } else if (serviceProvider === ServiceProvider.calibre) {
-      this.showServiceProviderExtraSettingButton();
-      this.hideServiceProviderExtraSettingDropdown();
-      this.hideCoverImageEdgeCurlToggle();
-      this.showCalibreSettings();
-    } else if (serviceProvider === ServiceProvider.openlibrary) {
-      this.hideServiceProviderExtraSettingButton();
-      this.showServiceProviderExtraSettingDropdown();
-      this.showCoverImageEdgeCurlToggle();
-      this.hideCalibreSettings();
-    } else if (serviceProvider === ServiceProvider.storygraph) {
-      this.hideServiceProviderExtraSettingButton();
-      this.hideServiceProviderExtraSettingDropdown();
-      this.hideCoverImageEdgeCurlToggle();
-      this.hideCalibreSettings();
-    } else {
-      this.hideServiceProviderExtraSettingButton();
-      this.showServiceProviderExtraSettingDropdown();
-      this.showCoverImageEdgeCurlToggle();
-      this.hideCalibreSettings();
-    }
-  }
-
-  private hideServiceProviderExtraSettingButton() {
-    if (this.serviceProviderExtraSettingButton !== null)
-      this.serviceProviderExtraSettingButton.addClass(
-        "book-search-plugin__hide",
-      );
-  }
-  private showServiceProviderExtraSettingButton() {
-    if (this.serviceProviderExtraSettingButton !== null)
-      this.serviceProviderExtraSettingButton.removeClass(
-        "book-search-plugin__hide",
-      );
-  }
-  private hideServiceProviderExtraSettingDropdown() {
-    if (this.preferredLocaleDropdownSetting !== null)
-      this.preferredLocaleDropdownSetting.settingEl.addClass(
-        "book-search-plugin__hide",
-      );
-  }
-  private showServiceProviderExtraSettingDropdown() {
-    if (this.preferredLocaleDropdownSetting !== null)
-      this.preferredLocaleDropdownSetting.settingEl.removeClass(
-        "book-search-plugin__hide",
-      );
-  }
-  private hideCoverImageEdgeCurlToggle() {
-    if (this.coverImageEdgeCurlToggleSetting !== null)
-      this.coverImageEdgeCurlToggleSetting.settingEl.addClass(
-        "book-search-plugin__hide",
-      );
-  }
-  private showCoverImageEdgeCurlToggle() {
-    if (this.coverImageEdgeCurlToggleSetting !== null)
-      this.coverImageEdgeCurlToggleSetting.settingEl.removeClass(
-        "book-search-plugin__hide",
-      );
-  }
-  private showCalibreSettings() {
-    if (this.calibreServerUrlSetting !== null)
-      this.calibreServerUrlSetting.settingEl.removeClass(
-        "book-search-plugin__hide",
-      );
-    if (this.calibreLibraryIdSetting !== null)
-      this.calibreLibraryIdSetting.settingEl.removeClass(
-        "book-search-plugin__hide",
-      );
-    if (this.calibreSettingsHeader !== null)
-      this.calibreSettingsHeader.settingEl.removeClass(
-        "book-search-plugin__hide",
-      );
-  }
-  private hideCalibreSettings() {
-    if (this.calibreServerUrlSetting !== null)
-      this.calibreServerUrlSetting.settingEl.addClass(
-        "book-search-plugin__hide",
-      );
-    if (this.calibreLibraryIdSetting !== null)
-      this.calibreLibraryIdSetting.settingEl.addClass(
-        "book-search-plugin__hide",
-      );
-    if (this.calibreSettingsHeader !== null)
-      this.calibreSettingsHeader.settingEl.addClass("book-search-plugin__hide");
-  }
-
   private createTemplateFileSetting(containerEl: HTMLElement) {
     const setting = new Setting(containerEl).setName("Template file");
     setting.descEl.createDiv({
@@ -1482,43 +1711,152 @@ export class BookSearchSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.classList.add("book-search-plugin__settings");
+    containerEl.addClass("book-search-plugin__settings");
 
-    this.createHeader("Book notes", containerEl);
+    const tabBar = containerEl.createDiv({
+      cls: "bsp-tabs",
+      attr: { role: "tablist" },
+    });
+    for (const tab of SETTINGS_TABS) {
+      const active = tab.id === this.activeTab;
+      const button = tabBar.createEl("button", {
+        cls: active ? "bsp-tab is-active" : "bsp-tab",
+        attr: { type: "button", role: "tab", "aria-selected": String(active) },
+      });
+      setIcon(button.createSpan({ cls: "bsp-tab-icon" }), tab.icon);
+      button.createSpan({ text: tab.label });
+      button.addEventListener("click", () => {
+        if (this.activeTab === tab.id) return;
+        this.activeTab = tab.id;
+        this.display();
+      });
+    }
+
+    const current =
+      SETTINGS_TABS.find((tab) => tab.id === this.activeTab) ??
+      SETTINGS_TABS[0];
+    const body = containerEl.createDiv({
+      cls: "bsp-tab-body",
+      attr: { role: "tabpanel" },
+    });
+    body.createEl("p", { cls: "bsp-tab-intro", text: current.intro });
+
+    switch (current.id) {
+      case "notes":
+        this.renderNotesTab(body);
+        break;
+      case "sources":
+        this.renderSourcesTab(body);
+        break;
+      case "search":
+        this.renderSearchTab(body);
+        break;
+      case "diagnostics":
+        this.renderDiagnosticsTab(body);
+        break;
+      case "support":
+        this.renderSupportTab(body);
+        break;
+    }
+  }
+
+  private renderNotesTab(containerEl: HTMLElement) {
+    this.createHeader("Where notes go", containerEl);
     this.createFileLocationSetting(containerEl);
     this.createFileNameFormatSetting(containerEl);
+    this.createOpenNoteSetting(containerEl);
+
+    this.createHeader("What a note contains", containerEl);
     this.createFrontmatterSetting(containerEl);
     this.createTemplateFileSetting(containerEl);
     this.createContentSetting(containerEl);
+    this.createEnableSeriesLinkingSetting(containerEl);
+
+    this.createHeader("Tags", containerEl);
     this.createTagSettings(containerEl);
+
+    this.createHeader("Covers", containerEl);
     this.createCoverModeSetting(containerEl);
     if (this.plugin.settings.coverImageMode === "local") {
       this.createCoverImagePathSetting(containerEl);
     }
-    this.createShowTemplatePreviewSetting(containerEl);
+  }
 
-    this.createHeader("Provider", containerEl);
-    this.createServiceProviderSetting(containerEl);
+  private renderSourcesTab(containerEl: HTMLElement) {
+    this.createHeader("Searching", containerEl);
+    this.createDefaultSourceSetting(containerEl);
+    this.createPreferredLocaleSetting(containerEl);
     this.createShowCoverImageInSearchSetting(containerEl);
-    this.createGoogleApiSettings(containerEl);
-    this.createHardcoverApiSettings(containerEl);
-    this.createLibraryThingApiSettings(containerEl);
-
-    this.createHeader("Advanced features", containerEl);
-    this.createWarnOnDuplicateSetting(containerEl);
-    this.createEnableSeriesLinkingSetting(containerEl);
-    this.createSearchHistorySizeSetting(containerEl);
-    this.createClearSearchHistorySetting(containerEl);
     this.createShowIndividualServiceButtonsSetting(containerEl);
 
-    this.createHeader("Merging", containerEl);
+    this.createHeader("Sources", containerEl);
+    this.createNoSetupSources(containerEl);
+    this.createGoogleApiSettings(containerEl);
+    this.createStoryGraphLoginSettings(containerEl);
+    this.createHardcoverApiSettings(containerEl);
+    this.createLibraryThingApiSettings(containerEl);
+    this.createCalibreSettings(containerEl);
+  }
+
+  private renderSearchTab(containerEl: HTMLElement) {
+    this.createHeader("Before a note is created", containerEl);
+    this.createWarnOnDuplicateSetting(containerEl);
+
+    this.createHeader("Search history", containerEl);
+    this.createSearchHistorySizeSetting(containerEl);
+    this.createClearSearchHistorySetting(containerEl);
+
+    this.createHeader("When sources disagree", containerEl);
     this.createFieldSourcePreferencesSetting(containerEl);
+  }
 
-    this.createHeader("Diagnostics", containerEl);
+  private renderSupportTab(containerEl: HTMLElement) {
+    const card = containerEl.createDiv({ cls: "bsp-support" });
+    setIcon(card.createDiv({ cls: "bsp-support-icon" }), "heart");
+    card.createDiv({
+      cls: "bsp-support-title",
+      text: "Enjoying Global Book Search?",
+    });
+    card.createEl("p", {
+      text: "Global Book Search is free and open source, made and maintained by DuckTapeKiller. If it is useful to you, you can support its development on Ko-fi.",
+    });
+    const kofi = card.createEl("a", {
+      cls: "bsp-support-button",
+      href: KOFI_URL,
+      attr: { "aria-label": "Support DuckTapeKiller on Ko-fi" },
+    });
+    setIcon(kofi.createSpan({ cls: "bsp-support-button-icon" }), "coffee");
+    kofi.createSpan({ text: "Support on Ko-fi" });
+
+    this.createHeader("Help and feedback", containerEl);
+    new Setting(containerEl)
+      .setName("Report a problem or suggest a feature")
+      .setDesc(
+        "Open an issue on GitHub. For a problem with a source, include the report from Diagnostics → Copy report.",
+      )
+      .addButton((button) =>
+        button
+          .setButtonText("Open issues")
+          .onClick(() => window.open(`${docUrl}/issues`)),
+      );
+    new Setting(containerEl)
+      .setName("Star the project")
+      .setDesc("A star on GitHub helps other readers find the plugin.")
+      .addButton((button) =>
+        button
+          .setButtonText("Open on GitHub")
+          .onClick(() => window.open(docUrl)),
+      );
+    new Setting(containerEl)
+      .setName("Version")
+      .setDesc(`Global Book Search ${this.plugin.manifest.version}`);
+  }
+
+  private renderDiagnosticsTab(containerEl: HTMLElement) {
+    this.createHeader("Network", containerEl);
     this.createDiagnosticsSettings(containerEl);
-    this.createProviderHealthSummary(containerEl);
 
-    // Initialize visibility
-    this.toggleServiceProviderExtraSettings();
+    this.createHeader("Service performance", containerEl);
+    this.createProviderHealthSummary(containerEl);
   }
 }

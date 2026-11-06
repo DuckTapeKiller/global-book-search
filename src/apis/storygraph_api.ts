@@ -1,14 +1,108 @@
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
-import { getHttpConfig, httpRequest } from "@utils/http";
+import { getHttpConfig, httpRequest, ProviderBlockedError } from "@utils/http";
 import { getArray, getProp, getString, isRecord } from "@utils/json";
+import type { BookSearchPluginSettings } from "@settings/settings";
+
+/**
+ * The user's own StoryGraph login: the two cookies their browser holds after
+ * signing in. StoryGraph puts a Cloudflare check in front of anonymous
+ * requests but answers signed-in ones, so this is what makes the source work.
+ */
+export interface StoryGraphLogin {
+  session: string; // _storygraph_session
+  rememberToken: string; // remember_user_token
+}
+
+const STORYGRAPH_HOST = "app.thestorygraph.com";
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
+
+/**
+ * A cookie value as pasted from the browser: accepted with or without its
+ * name ("remember_user_token=…"), with characters that can never be part of a
+ * cookie value (whitespace, quotes, separators) removed so the header stays
+ * well formed.
+ */
+export function cleanCookieValue(raw: string, name: string): string {
+  let value = (raw ?? "").trim();
+  if (value.startsWith(`${name}=`)) value = value.slice(name.length + 1);
+  return value.replace(/[\s;,"\\]/g, "");
+}
+
+/** The StoryGraph login saved in the settings, or undefined when there is none. */
+export function storyGraphLogin(
+  settings: Pick<
+    BookSearchPluginSettings,
+    "storygraphSessionCookie" | "storygraphRememberToken"
+  >,
+): StoryGraphLogin | undefined {
+  const session = cleanCookieValue(
+    settings.storygraphSessionCookie,
+    "_storygraph_session",
+  );
+  const rememberToken = cleanCookieValue(
+    settings.storygraphRememberToken,
+    "remember_user_token",
+  );
+  return session || rememberToken ? { session, rememberToken } : undefined;
+}
+
+/** True only for HTTPS addresses on StoryGraph itself: the login goes nowhere else. */
+export function isStoryGraphUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === STORYGRAPH_HOST;
+  } catch {
+    return false;
+  }
+}
+
+/** StoryGraph's sign-in page, served instead of results when a login is missing or stale. */
+export function isSignInPage(html: string): boolean {
+  const text = html || "";
+  if (text.includes("book-pane") || text.includes("data-book-id")) return false;
+  return (
+    text.includes("You need to sign in") ||
+    text.includes("You are being redirected") ||
+    text.includes("<title>Sign In")
+  );
+}
 
 export class StoryGraphApi implements BaseBooksApiImpl {
   static readonly SCRAPER_VERSION = "2026-05-13";
 
-  private readonly baseUrl = "https://app.thestorygraph.com";
+  private readonly baseUrl = `https://${STORYGRAPH_HOST}`;
 
-  constructor() {}
+  constructor(private readonly login?: StoryGraphLogin) {}
+
+  /** Request headers for `url`; the login is attached only for StoryGraph itself. */
+  private headersFor(url: string): Record<string, string> {
+    const headers: Record<string, string> = { "User-Agent": USER_AGENT };
+    if (!this.login || !isStoryGraphUrl(url)) return headers;
+    const cookies = [
+      this.login.session && `_storygraph_session=${this.login.session}`,
+      this.login.rememberToken &&
+        `remember_user_token=${this.login.rememberToken}`,
+    ].filter(Boolean);
+    if (cookies.length > 0) headers.Cookie = cookies.join("; ");
+    return headers;
+  }
+
+  /** A refusal from StoryGraph, explained in terms of the login the user can fix. */
+  private refusal(status: number, retryInMs = 0): ProviderBlockedError {
+    return this.login
+      ? new ProviderBlockedError("storygraph", status, retryInMs, {
+          message:
+            "StoryGraph did not accept your login; it has probably expired. Sign in to StoryGraph in your browser and copy fresh cookies into the plugin settings (StoryGraph login).",
+          shortReason: "login not accepted",
+        })
+      : new ProviderBlockedError("storygraph", status, retryInMs, {
+          message:
+            "StoryGraph only answers signed-in requests. Add your StoryGraph login in the plugin settings (StoryGraph login) to search it.",
+          shortReason: "sign-in needed",
+        });
+  }
 
   private parseHtml(html: string): Document {
     const parser = new DOMParser();
@@ -23,35 +117,23 @@ export class StoryGraphApi implements BaseBooksApiImpl {
     const searchUrl = `${this.baseUrl}/browse?search_term=${encodeURIComponent(query)}`;
     try {
       const searchRes = await httpRequest(
+        { url: searchUrl, method: "GET", headers: this.headersFor(searchUrl) },
         {
-          url: searchUrl,
-          method: "GET",
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-          },
+          providerId: "storygraph",
+          purpose: "search",
+          rejectOnChallenge: true,
         },
-        { providerId: "storygraph", purpose: "search" },
-      );
+      ).catch((error: unknown) => {
+        throw error instanceof ProviderBlockedError
+          ? this.refusal(error.status, error.retryInMs)
+          : error;
+      });
+
+      // A sign-in page instead of results: the login is missing or stale.
+      if (isSignInPage(searchRes.text)) throw this.refusal(401);
 
       const doc = this.parseHtml(searchRes.text);
       const books: Book[] = [];
-
-      // Detect if we got a login redirect instead of search results
-      // Only treat as login if no book panes are found AND we see the explicit redirect message
-      if (
-        doc.querySelectorAll(".book-pane").length === 0 &&
-        doc.querySelectorAll("[data-book-id]").length === 0 &&
-        (searchRes.text.includes("You need to sign in") ||
-          searchRes.text.includes("You are being redirected") ||
-          searchRes.text.includes("<title>Sign In"))
-      ) {
-        console.warn(
-          "StoryGraph: search requires authentication. " +
-            "Please ensure you are logged in or try a different service.",
-        );
-        return [];
-      }
 
       const strategies: Array<{ id: string; run: () => void }> = [
         {
@@ -114,6 +196,9 @@ export class StoryGraphApi implements BaseBooksApiImpl {
 
       return books;
     } catch (error) {
+      // StoryGraph sits behind a Cloudflare bot check. Tell the caller instead
+      // of reporting "no results", so the user learns why nothing came back.
+      if (error instanceof ProviderBlockedError) throw error;
       console.warn("StoryGraph getByQuery failed:", {
         url: searchUrl,
         error: error instanceof Error ? error.message : String(error),
@@ -129,12 +214,13 @@ export class StoryGraphApi implements BaseBooksApiImpl {
         {
           url: editionsUrl,
           method: "GET",
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-          },
+          headers: this.headersFor(editionsUrl),
         },
-        { providerId: "storygraph", purpose: "editions" },
+        {
+          providerId: "storygraph",
+          purpose: "editions",
+          rejectOnChallenge: true,
+        },
       );
 
       const doc = this.parseHtml(editionsRes.text);
@@ -176,7 +262,9 @@ export class StoryGraphApi implements BaseBooksApiImpl {
 
       return bestBook;
     } catch (error) {
-      console.warn("StoryGraph getBook error", error);
+      if (!(error instanceof ProviderBlockedError)) {
+        console.warn("StoryGraph getBook error", error);
+      }
       return book;
     }
   }
@@ -226,12 +314,13 @@ export class StoryGraphApi implements BaseBooksApiImpl {
         {
           url: bookLink,
           method: "GET",
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-          },
+          headers: this.headersFor(bookLink),
         },
-        { providerId: "storygraph", purpose: "book-fallback" },
+        {
+          providerId: "storygraph",
+          purpose: "book-fallback",
+          rejectOnChallenge: true,
+        },
       );
 
       const html: string = res.text;
@@ -287,7 +376,9 @@ export class StoryGraphApi implements BaseBooksApiImpl {
         }
       }
     } catch (err) {
-      console.warn("StoryGraph fetchIsbnFromBookPage failed:", err);
+      if (!(err instanceof ProviderBlockedError)) {
+        console.warn("StoryGraph fetchIsbnFromBookPage failed:", err);
+      }
     }
 
     return { isbn10, isbn13 };

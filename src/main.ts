@@ -13,8 +13,13 @@ import { CalibreBrowseModal } from "@views/calibre_browse_modal";
 import {
   DuplicateCheckModal,
   DuplicateAction,
-  findExistingBookNote,
 } from "@views/duplicate_check_modal";
+import {
+  findExistingBookNote,
+  frontmatterIsbns,
+  toIsbn13,
+} from "@utils/existing_note";
+import { makeFileName } from "@utils/utils";
 import { CursorJumper } from "@utils/cursor_jumper";
 import { Book } from "@models/book.model";
 import { BookNoteCreator } from "@utils/note_creator";
@@ -35,15 +40,24 @@ import {
   BookWithSource,
 } from "@apis/global_search";
 import { VaultIndexEntry, BookEdition } from "@models/accuracy.model";
-import { configureHttp } from "@utils/http";
+import { clearHttpCache, configureHttp } from "@utils/http";
+import { StoryGraphApi, storyGraphLogin } from "@apis/storygraph_api";
 import { resolveSecret } from "@utils/secrets";
 import { asRecord } from "@utils/json";
 import { loadHistory, serializeHistory } from "@utils/provider_history";
+import {
+  SettingsStore,
+  requireReadableSettings,
+  toDiskValue,
+} from "@utils/settings_store";
 
 export default class BookSearchPlugin extends Plugin {
   settings: BookSearchPluginSettings;
 
   private noteCreator: BookNoteCreator;
+  private settingsStore: SettingsStore<BookSearchPluginSettings>;
+  private settingTab?: BookSearchSettingTab;
+  private didWarnSettingsNotSaved = false;
 
   public getVaultIndex(): VaultIndexEntry[] {
     const index: VaultIndexEntry[] = [];
@@ -51,12 +65,12 @@ export default class BookSearchPlugin extends Plugin {
     for (const file of files) {
       const cache = this.app.metadataCache.getFileCache(file);
       if (cache?.frontmatter) {
-        const frontmatter = asRecord(cache.frontmatter);
-        // Frontmatter ISBNs may be stored as quoted strings or YAML numbers.
-        const toIsbn = (v: unknown): string =>
-          typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
-        const isbn13 = toIsbn(frontmatter.isbn13);
-        const isbn10 = toIsbn(frontmatter.isbn10);
+        // Any key spelling ("isbn 13", isbn13, ISBN-13…), numbers and hyphens
+        // normalised; an ISBN-10 also counts in its ISBN-13 form.
+        const isbns = frontmatterIsbns(asRecord(cache.frontmatter));
+        const isbn10 = isbns.find((isbn) => isbn.length === 10) ?? "";
+        const isbn13 =
+          isbns.find((isbn) => isbn.length === 13) ?? toIsbn13(isbn10);
         if (isbn13 || isbn10) {
           index.push({
             path: file.path,
@@ -70,8 +84,14 @@ export default class BookSearchPlugin extends Plugin {
   }
 
   async onload() {
+    this.settingsStore = new SettingsStore(
+      {
+        load: async () => requireReadableSettings(await this.loadData()),
+        save: (data) => this.saveData(data),
+      },
+      () => toDiskValue(DEFAULT_SETTINGS),
+    );
     await this.loadSettings();
-    this.applyRuntimeHttpConfig();
     this.noteCreator = new BookNoteCreator(this.app, this.settings);
 
     // Rehydrate the rolling provider-performance history and flush it to disk
@@ -181,12 +201,19 @@ export default class BookSearchPlugin extends Plugin {
       callback: () => {
         void (async () => {
           new Notice("Testing LibraryThing connectivity…");
-          const key = await resolveSecret(
-            this.app,
-            this.settings.librarythingApiKey,
-          );
-          const report = await probeLibraryThing(key);
+          const report = await this.checkLibraryThing();
           new Notice("LibraryThing connectivity:\n" + report, 60000);
+        })();
+      },
+    });
+
+    this.addCommand({
+      id: "test-storygraph-login",
+      name: "Test StoryGraph login",
+      callback: () => {
+        void (async () => {
+          new Notice("Testing StoryGraph login…");
+          new Notice(await this.checkStoryGraphLogin(), 15_000);
         })();
       },
     });
@@ -197,11 +224,7 @@ export default class BookSearchPlugin extends Plugin {
       callback: () => {
         void (async () => {
           new Notice("Testing Hardcover API…");
-          const token = await resolveSecret(
-            this.app,
-            this.settings.hardcoverApiToken,
-          );
-          const report = await probeHardcover(token);
+          const report = await this.checkHardcover();
           new Notice("Hardcover API:\n" + report, 60000);
         })();
       },
@@ -242,7 +265,8 @@ export default class BookSearchPlugin extends Plugin {
     });
 
     // This adds a settings tab
-    this.addSettingTab(new BookSearchSettingTab(this.app, this));
+    this.settingTab = new BookSearchSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     console.debug(
       `${this.manifest.name}: version ${this.manifest.version} (requires obsidian ${this.manifest.minAppVersion})`,
@@ -296,6 +320,23 @@ export default class BookSearchPlugin extends Plugin {
   // Duplicate Detection
   // ========================================
 
+  /**
+   * The note this book already has in the notes folder: matched by ISBN under
+   * any key spelling, or by the file name a new note would get.
+   */
+  findExistingNote(book: Book, extraIsbn?: string): TFile | null {
+    return findExistingBookNote(this.app, this.settings.folder, {
+      title: book.title,
+      isbns: [book.isbn13, book.isbn10, book.ids, extraIsbn].filter(
+        (isbn): isbn is string => !!isbn,
+      ),
+      fileName: makeFileName(book, this.settings.fileNameFormat).replace(
+        /\.md$/,
+        "",
+      ),
+    });
+  }
+
   async checkForDuplicate(
     book: Book,
   ): Promise<{ action: DuplicateAction; file?: TFile }> {
@@ -303,12 +344,7 @@ export default class BookSearchPlugin extends Plugin {
       return { action: DuplicateAction.CREATE_ANYWAY };
     }
 
-    const existingFile = findExistingBookNote(
-      this.app,
-      this.settings.folder,
-      book.title,
-      book.isbn13 || book.isbn10 || book.ids,
-    );
+    const existingFile = this.findExistingNote(book);
 
     if (existingFile) {
       const modal = new DuplicateCheckModal(this.app, existingFile, book.title);
@@ -358,11 +394,60 @@ export default class BookSearchPlugin extends Plugin {
   // their actual values, so providers receive usable tokens regardless of
   // whether the key is stored as a secret name or as a plain value.
   async resolveProviderSettings(): Promise<BookSearchPluginSettings> {
-    const [hardcoverApiToken, librarythingApiKey] = await Promise.all([
+    const [
+      hardcoverApiToken,
+      librarythingApiKey,
+      storygraphSessionCookie,
+      storygraphRememberToken,
+    ] = await Promise.all([
       resolveSecret(this.app, this.settings.hardcoverApiToken),
       resolveSecret(this.app, this.settings.librarythingApiKey),
+      resolveSecret(this.app, this.settings.storygraphSessionCookie),
+      resolveSecret(this.app, this.settings.storygraphRememberToken),
     ]);
-    return { ...this.settings, hardcoverApiToken, librarythingApiKey };
+    return {
+      ...this.settings,
+      hardcoverApiToken,
+      librarythingApiKey,
+      storygraphSessionCookie,
+      storygraphRememberToken,
+    };
+  }
+
+  /** Probe Hardcover with the saved token; a readable, multi-line report. */
+  async checkHardcover(): Promise<string> {
+    const token = await resolveSecret(
+      this.app,
+      this.settings.hardcoverApiToken,
+    );
+    return probeHardcover(token);
+  }
+
+  /** Probe LibraryThing with the saved key; a readable, multi-line report. */
+  async checkLibraryThing(): Promise<string> {
+    const key = await resolveSecret(this.app, this.settings.librarythingApiKey);
+    return probeLibraryThing(key);
+  }
+
+  /**
+   * One test search with the saved StoryGraph login, reported in plain words.
+   * The HTTP cache is cleared first so the answer reflects the login as it is
+   * now, not an earlier result or pause.
+   */
+  async checkStoryGraphLogin(): Promise<string> {
+    const login = storyGraphLogin(await this.resolveProviderSettings());
+    if (!login) {
+      return "No StoryGraph login is saved yet (Settings → Global Book Search → StoryGraph login).";
+    }
+    clearHttpCache();
+    try {
+      const books = await new StoryGraphApi(login).getByQuery("dune");
+      return books.length > 0
+        ? `StoryGraph login works: a test search found ${books.length} books.`
+        : "StoryGraph accepted the request, but a test search found no books. The connection may have failed or StoryGraph may have changed its pages; the developer console has details.";
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
   }
 
   async insertMetadata(): Promise<void> {
@@ -415,6 +500,13 @@ export default class BookSearchPlugin extends Plugin {
         return;
       }
 
+      if (action === DuplicateAction.UPDATE_METADATA && existingFile) {
+        await this.noteCreator.updateMetadata(existingFile, book);
+        new Notice(`Metadata updated in "${existingFile.basename}"`);
+        await this.openNewBookNote(existingFile);
+        return;
+      }
+
       const targetFile = await this.noteCreator.create(book);
       await this.openNewBookNote(targetFile);
     } catch (err) {
@@ -455,6 +547,10 @@ export default class BookSearchPlugin extends Plugin {
             if (action === DuplicateAction.CANCEL) continue;
             if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
               await this.openNewBookNote(existingFile);
+              continue;
+            }
+            if (action === DuplicateAction.UPDATE_METADATA && existingFile) {
+              await this.noteCreator.updateMetadata(existingFile, book);
               continue;
             }
 
@@ -518,6 +614,14 @@ export default class BookSearchPlugin extends Plugin {
 
           if (action === DuplicateAction.OPEN_EXISTING && existingFile) {
             progressModal.markDone("Opening existing note...");
+            await this.openNewBookNote(existingFile);
+            continue;
+          }
+
+          if (action === DuplicateAction.UPDATE_METADATA && existingFile) {
+            progressModal.setStatus("Updating existing metadata...");
+            await this.noteCreator.updateMetadata(existingFile, enrichedBook);
+            progressModal.markDone("Metadata updated successfully.");
             await this.openNewBookNote(existingFile);
             continue;
           }
@@ -623,12 +727,7 @@ export default class BookSearchPlugin extends Plugin {
             `Importing ${index + 1} / ${totalCount}: ${book.title}`,
           );
           if (this.settings.warnOnDuplicate) {
-            const existingFile = findExistingBookNote(
-              this.app,
-              this.settings.folder,
-              book.title,
-              book.isbn13 || book.isbn10 || book.ids,
-            );
+            const existingFile = this.findExistingNote(book);
             if (existingFile) {
               skippedCount++;
               continue;
@@ -726,23 +825,76 @@ export default class BookSearchPlugin extends Plugin {
   }
 
   async loadSettings() {
-    const data = (await this.loadData()) as
-      | Partial<BookSearchPluginSettings>
-      | null
-      | undefined;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
+    this.settings = await this.settingsStore.load();
+    if (this.settingsStore.loadFailed) {
+      new Notice(
+        "Global Book Search could not read its settings file, so the defaults are in use for now. Your saved settings have not been touched.",
+        15_000,
+      );
+    }
     this.applyRuntimeHttpConfig();
   }
 
-  async saveSettings() {
-    await this.saveData(this.settings);
+  /**
+   * Save the settings that changed. Never rejects: a settings file that cannot
+   * be read is reported once and left untouched rather than overwritten.
+   */
+  async saveSettings(): Promise<void> {
+    try {
+      await this.settingsStore.save(this.settings);
+    } catch (error) {
+      console.warn("Global Book Search: settings were not saved", error);
+      if (!this.didWarnSettingsNotSaved) {
+        this.didWarnSettingsNotSaved = true;
+        new Notice(
+          "Global Book Search could not save your settings because its settings file (data.json in the plugin folder) is unreadable. Nothing was overwritten. If it stays like this, restore or delete that file.",
+          15_000,
+        );
+      }
+    }
     this.applyRuntimeHttpConfig();
   }
 
-  /** Persist the in-memory provider-performance history to the data file. */
+  /**
+   * Persist the in-memory provider-performance history. Like every save, it
+   * writes only what changed (normally just the history), so this periodic
+   * task can never replace the user's other settings.
+   */
   flushProviderHistory(): void {
-    this.settings.providerHistory = serializeHistory();
-    void this.saveData(this.settings);
+    const history = serializeHistory();
+    // Nothing recorded yet (a fresh install, or no requests this session):
+    // leave the file alone rather than create one holding an empty history.
+    if (
+      this.settings.providerHistory === undefined &&
+      Object.keys(history).length === 0
+    ) {
+      return;
+    }
+    this.settings.providerHistory = history;
+    void this.saveSettings();
+  }
+
+  /**
+   * Obsidian calls this when data.json was changed outside the plugin, for
+   * example by sync from another device. Adopt the new values so a later save
+   * cannot write stale ones back.
+   */
+  onExternalSettingsChange(): void {
+    void this.reloadSettingsFromDisk().catch((err) => console.warn(err));
+  }
+
+  private async reloadSettingsFromDisk(): Promise<void> {
+    // The settings object is updated in place, so every holder of it (the note
+    // creator, open modals) sees the new values. The provider history lives in
+    // memory and is rewritten by the next flush, so it is not a reason to
+    // refresh anything.
+    const adopted = (await this.settingsStore.reload(this.settings)).filter(
+      (key) => key !== "providerHistory",
+    );
+    if (adopted.length === 0) return;
+
+    this.applyRuntimeHttpConfig();
+    if (this.settingTab?.containerEl.isShown()) this.settingTab.display();
   }
 
   onunload() {
@@ -915,12 +1067,7 @@ export default class BookSearchPlugin extends Plugin {
           );
 
           if (skipDuplicates) {
-            const existing = findExistingBookNote(
-              this.app,
-              this.settings.folder,
-              enrichment.book.title,
-              enrichment.book.isbn13 || enrichment.book.isbn10 || isbn,
-            );
+            const existing = this.findExistingNote(enrichment.book, isbn);
             if (existing) {
               skippedCount++;
               continue;

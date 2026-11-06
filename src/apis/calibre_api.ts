@@ -258,17 +258,18 @@ export class CalibreApi implements BaseBooksApiImpl {
     const seriesInfo = getString(data.series);
     const seriesIndexRaw = data.series_index;
 
-    let series = "";
+    // The series link is derived when the note is rendered (see utils/series).
+    const series = seriesInfo;
     let seriesNumber: number | undefined;
-    let seriesLink = "";
 
     if (seriesInfo) {
-      series = seriesInfo;
-      seriesLink = `[[${seriesInfo}]]`;
-      if (typeof seriesIndexRaw === "number") {
-        seriesNumber = seriesIndexRaw;
-      } else if (typeof seriesIndexRaw === "string") {
-        seriesNumber = parseFloat(seriesIndexRaw);
+      const index =
+        typeof seriesIndexRaw === "string"
+          ? parseFloat(seriesIndexRaw)
+          : seriesIndexRaw;
+      // Calibre can send a non-numeric index; never let NaN reach a note.
+      if (typeof index === "number" && Number.isFinite(index)) {
+        seriesNumber = index;
       }
     }
 
@@ -305,7 +306,6 @@ export class CalibreApi implements BaseBooksApiImpl {
       // New fields
       series,
       seriesNumber,
-      seriesLink,
       customColumns,
       sourceProvider: "calibre",
       sourceId: id,

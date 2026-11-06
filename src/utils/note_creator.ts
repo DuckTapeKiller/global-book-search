@@ -8,6 +8,7 @@ import {
   applyTemplateTransformations,
   executeInlineScriptsTemplates,
 } from "@utils/template";
+import { applySeriesFields } from "@utils/series";
 import {
   makeFileName,
   applyDefaultFrontMatter,
@@ -16,6 +17,13 @@ import {
   parseFrontMatter,
   createBookTags,
 } from "@utils/utils";
+
+/** `"text"` as written in a template becomes `text`; anything else is unchanged. */
+export function unquoteYamlScalar(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const quoted = /^"([\s\S]*)"$/.exec(value.trim());
+  return quoted ? quoted[1].replace(/\\"/g, '"') : value;
+}
 
 export class BookNoteCreator {
   constructor(
@@ -80,8 +88,16 @@ export class BookNoteCreator {
 
   async updateMetadata(file: TFile, book: Book): Promise<void> {
     const resolvedFrontmatter = await this.getResolvedFrontmatter(book);
+    // Templates quote values for YAML ("{{title}}"); processFrontMatter does its
+    // own quoting, so pass the bare values or the quotes end up inside them.
+    const values: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(resolvedFrontmatter)) {
+      values[key] = Array.isArray(value)
+        ? value.map(unquoteYamlScalar)
+        : unquoteYamlScalar(value);
+    }
     await this.app.fileManager.processFrontMatter(file, (fm) => {
-      Object.assign(fm, resolvedFrontmatter);
+      Object.assign(fm, values);
     });
   }
 
@@ -94,6 +110,10 @@ export class BookNoteCreator {
       this.settings.authorTagPrefix,
       this.settings.titleTagPrefix,
     );
+
+    // {{series}} and {{seriesNumber}} come from the provider; {{seriesLink}}
+    // follows the "Enable series linking" setting.
+    applySeriesFields(book, this.settings.enableSeriesLinking);
 
     // Handle cover image
     const coverImageUrl = (book.coverUrl || book.coverSmallUrl || "").trim();
