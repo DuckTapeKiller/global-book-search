@@ -601,9 +601,12 @@ export class BookSearchSettingTab extends PluginSettingTab {
             // section the icon each time.
             const { heading, icon } = group;
             // Setting groups came with Obsidian 1.11; these rows are only
-            // drawn from 1.13 on, where they always exist.
-            if (index === 0 && heading && icon && requireApiVersion("1.11.0")) {
-              settingGroup.setHeading(sectionTitle(heading, icon));
+            // drawn from 1.13 on, where they always exist. The version check
+            // has its own if, the form Obsidian's plugin review accepts.
+            if (index === 0 && heading && icon) {
+              if (requireApiVersion("1.11.0")) {
+                settingGroup.setHeading(sectionTitle(heading, icon));
+              }
             }
             setting.settingEl.addClass("bsp-setting");
             row.render(setting);
@@ -621,18 +624,19 @@ export class BookSearchSettingTab extends PluginSettingTab {
         searchable: false,
         visible: false,
         render: (_setting: Setting, settingGroup: SettingGroup) => {
-          if (!requireApiVersion("1.11.0")) return;
-          for (const row of Array.from(settingGroup.listEl.children)) {
-            const name = row
-              .querySelector(".setting-item-name")
-              ?.textContent?.trim();
-            const page = pages.find((candidate) => candidate.name === name);
-            if (!page || row.querySelector(":scope > .bsp-page-icon")) {
-              continue;
+          if (requireApiVersion("1.11.0")) {
+            for (const row of Array.from(settingGroup.listEl.children)) {
+              const name = row
+                .querySelector(".setting-item-name")
+                ?.textContent?.trim();
+              const page = pages.find((candidate) => candidate.name === name);
+              if (!page || row.querySelector(":scope > .bsp-page-icon")) {
+                continue;
+              }
+              const badge = createSpan({ cls: "bsp-page-icon" });
+              setIcon(badge, page.icon);
+              row.prepend(badge);
             }
-            const badge = createSpan({ cls: "bsp-page-icon" });
-            setIcon(badge, page.icon);
-            row.prepend(badge);
           }
         },
       },
