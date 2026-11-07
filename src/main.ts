@@ -43,7 +43,7 @@ import { VaultIndexEntry, BookEdition } from "@models/accuracy.model";
 import { clearHttpCache, configureHttp } from "@utils/http";
 import { StoryGraphApi, storyGraphLogin } from "@apis/storygraph_api";
 import { resolveSecret } from "@utils/secrets";
-import { asRecord } from "@utils/json";
+import { asRecord, toErrorMessage } from "@utils/json";
 import { loadHistory, serializeHistory } from "@utils/provider_history";
 import {
   SettingsStore,
@@ -446,7 +446,7 @@ export default class BookSearchPlugin extends Plugin {
         ? `StoryGraph login works: a test search found ${books.length} books.`
         : "StoryGraph accepted the request, but a test search found no books. The connection may have failed or StoryGraph may have changed its pages; the developer console has details.";
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return toErrorMessage(error);
     }
   }
 
@@ -738,9 +738,7 @@ export default class BookSearchPlugin extends Plugin {
           await this.openNewBookNote(targetFile);
           successCount++;
         } catch (err) {
-          errors.push(
-            `${book.title}: ${err instanceof Error ? err.message : String(err)}`,
-          );
+          errors.push(`${book.title}: ${toErrorMessage(err)}`);
         }
       }
       progressNotice.hide();
@@ -1103,10 +1101,7 @@ export default class BookSearchPlugin extends Plugin {
           createdCount++;
           lastCreated = targetFile;
         } catch (err) {
-          const msg =
-            err instanceof Error
-              ? err.message
-              : `Unknown error: ${String(err)}`;
+          const msg = toErrorMessage(err);
           errors.push(`${isbn}: ${msg}`);
         }
       }
@@ -1123,7 +1118,7 @@ export default class BookSearchPlugin extends Plugin {
         new Notice(`Bulk import errors: ${errors.slice(0, 5).join(" | ")}`);
       }
     } catch (err) {
-      progressModal.markError(err instanceof Error ? err.message : String(err));
+      progressModal.markError(toErrorMessage(err));
       throw err;
     }
   }

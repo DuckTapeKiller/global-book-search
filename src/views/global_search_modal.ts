@@ -1,3 +1,4 @@
+import { toErrorMessage } from "@utils/json";
 import { Modal, Notice, Setting, setIcon, TextComponent } from "obsidian";
 import BookSearchPlugin from "@src/main";
 import { globalSearch, BookWithSource } from "@apis/global_search";
@@ -206,7 +207,9 @@ export class GlobalSearchModal extends Modal {
       this.close();
     } catch (error) {
       this.statusTextEl.setText("");
-      this.callback(error instanceof Error ? error : new Error(String(error)));
+      this.callback(
+        error instanceof Error ? error : new Error(toErrorMessage(error)),
+      );
       this.close();
     } finally {
       this.isBusy = false;

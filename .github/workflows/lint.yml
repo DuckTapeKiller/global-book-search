@@ -28,6 +28,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Obsidian's lint must always be the newest release: the community
+      # review runs the current rules, so an older plugin here would let
+      # through what the review then reports.
+      - name: Obsidian lint plugin is the latest release
+        run: |
+          installed=$(node -p "require('eslint-plugin-obsidianmd/package.json').version")
+          latest=$(npm view eslint-plugin-obsidianmd version)
+          echo "eslint-plugin-obsidianmd: installed $installed, latest $latest"
+          if [ "$installed" != "$latest" ]; then
+            echo "::error::eslint-plugin-obsidianmd $installed is behind $latest. Update it (pnpm add -D eslint-plugin-obsidianmd@latest), then fix what the new rules report."
+            exit 1
+          fi
+
       # Obsidian's official plugin lint on every file, plus formatting and the
       # type check; any error or warning fails the run.
       - name: Lint (official Obsidian rules)

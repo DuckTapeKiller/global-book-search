@@ -8,6 +8,7 @@ import {
   getPath,
   getString,
   getStringArray,
+  toErrorMessage,
 } from "@utils/json";
 
 // LibraryThing's HTML pages and its REST/covers APIs all sit behind Cloudflare's
@@ -602,7 +603,7 @@ export async function probeLibraryThing(apiToken?: string): Promise<string> {
         lines.push(`Talpa search: OK — ${n} results`);
       }
     } catch (err) {
-      lines.push(`Talpa search: failed — ${String(err)}`);
+      lines.push(`Talpa search: failed — ${toErrorMessage(err)}`);
     }
   }
 
@@ -627,7 +628,7 @@ export async function probeLibraryThing(apiToken?: string): Promise<string> {
         : "Wayback detail: no snapshot",
     );
   } catch (err) {
-    lines.push(`Wayback detail: failed — ${String(err)}`);
+    lines.push(`Wayback detail: failed — ${toErrorMessage(err)}`);
   }
 
   return lines.join("\n");

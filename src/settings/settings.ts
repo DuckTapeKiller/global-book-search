@@ -600,7 +600,9 @@ export class BookSearchSettingTab extends PluginSettingTab {
             // before rendering the rows again, so the first row gives its
             // section the icon each time.
             const { heading, icon } = group;
-            if (index === 0 && heading && icon) {
+            // Setting groups came with Obsidian 1.11; these rows are only
+            // drawn from 1.13 on, where they always exist.
+            if (index === 0 && heading && icon && requireApiVersion("1.11.0")) {
               settingGroup.setHeading(sectionTitle(heading, icon));
             }
             setting.settingEl.addClass("bsp-setting");
@@ -619,6 +621,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
         searchable: false,
         visible: false,
         render: (_setting: Setting, settingGroup: SettingGroup) => {
+          if (!requireApiVersion("1.11.0")) return;
           for (const row of Array.from(settingGroup.listEl.children)) {
             const name = row
               .querySelector(".setting-item-name")
@@ -666,13 +669,18 @@ export class BookSearchSettingTab extends PluginSettingTab {
     if (requireApiVersion("1.13.0")) {
       this.update();
     } else if (this.containerEl.isShown()) {
-      this.display();
+      this.drawTabs();
     }
   }
 
   // ── Before Obsidian 1.13: the same pages as tabs ────────────────────────
 
   display(): void {
+    this.drawTabs();
+  }
+
+  /** The settings as tabs, for Obsidian before 1.13, which calls display(). */
+  private drawTabs(): void {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("book-search-plugin__settings");
@@ -693,7 +701,7 @@ export class BookSearchSettingTab extends PluginSettingTab {
       button.addEventListener("click", () => {
         if (this.activeTab === page.id) return;
         this.activeTab = page.id;
-        this.display();
+        this.drawTabs();
       });
     }
 

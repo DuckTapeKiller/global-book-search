@@ -1,3 +1,4 @@
+import { toErrorMessage } from "@utils/json";
 import { Modal, Notice, Setting, TextAreaComponent } from "obsidian";
 import BookSearchPlugin from "@src/main";
 
@@ -87,9 +88,7 @@ export class BulkImportModal extends Modal {
             this.raw = text || "";
             this.textArea?.setValue(this.raw);
           } catch (err) {
-            new Notice(
-              `Clipboard read failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
+            new Notice(`Clipboard read failed: ${toErrorMessage(err)}`);
           }
         })();
       }),

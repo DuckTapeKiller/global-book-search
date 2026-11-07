@@ -1,7 +1,13 @@
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
 import { getHttpConfig, httpRequest, ProviderBlockedError } from "@utils/http";
-import { getArray, getProp, getString, isRecord } from "@utils/json";
+import {
+  getArray,
+  getProp,
+  getString,
+  isRecord,
+  toErrorMessage,
+} from "@utils/json";
 import type { BookSearchPluginSettings } from "@settings/settings";
 
 /**
@@ -445,7 +451,7 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       if (error instanceof ProviderBlockedError) throw error;
       console.warn("StoryGraph getByQuery failed:", {
         url: searchUrl,
-        error: error instanceof Error ? error.message : String(error),
+        error: toErrorMessage(error),
       });
       return [];
     }

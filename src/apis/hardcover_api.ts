@@ -22,6 +22,7 @@ import {
   getString,
   getStringArray,
   isRecord,
+  toErrorMessage,
 } from "@utils/json";
 
 const HARDCOVER_GRAPHQL = "https://api.hardcover.app/v1/graphql";
@@ -68,7 +69,7 @@ export async function probeHardcover(apiToken: string): Promise<string> {
       const data = JSON.stringify(json.data ?? {});
       return `${label}: OK — ${data.slice(0, 240)}`;
     } catch (err) {
-      return `${label}: request failed — ${String(err)}`;
+      return `${label}: request failed — ${toErrorMessage(err)}`;
     }
   };
 

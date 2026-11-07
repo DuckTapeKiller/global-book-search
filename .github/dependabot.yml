@@ -1,0 +1,12 @@
+# Keeps Obsidian's official lint plugin at its newest release: a pull request
+# the day a new version comes out, which the lint workflow then runs.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    allow:
+      - dependency-name: "eslint-plugin-obsidianmd"
+    commit-message:
+      prefix: "lint"

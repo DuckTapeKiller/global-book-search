@@ -1,3 +1,4 @@
+import { toErrorMessage } from "@utils/json";
 import { App, Modal, setIcon, ButtonComponent, Notice } from "obsidian";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
@@ -120,7 +121,7 @@ export class BarcodeScannerModal extends Modal {
       );
       this.isScanning = true;
     } catch (err) {
-      new Notice("Could not start camera: " + err);
+      new Notice("Could not start camera: " + toErrorMessage(err));
       console.error(err);
     }
   }

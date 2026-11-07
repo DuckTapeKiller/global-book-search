@@ -9,6 +9,7 @@ import {
   getProp,
   getString,
   isRecord,
+  toErrorMessage,
 } from "@utils/json";
 import { parseSeriesFromTitle, seriesFromTitle } from "@utils/series";
 import { contributorKind } from "@utils/contributors";
@@ -1055,7 +1056,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     } catch (error) {
       console.warn("Goodreads autocomplete failed:", {
         url,
-        error: error instanceof Error ? error.message : String(error),
+        error: toErrorMessage(error),
       });
       return [];
     }
