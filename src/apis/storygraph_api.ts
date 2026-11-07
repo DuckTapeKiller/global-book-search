@@ -69,6 +69,250 @@ export function isSignInPage(html: string): boolean {
   );
 }
 
+/**
+ * The translators in StoryGraph's contributor line, in order: "with William
+ * Weaver (Translator), Richard Dixon (Translator)" gives both. Contributors in
+ * other roles (illustrators, narrators…) are left out. A line without any roles
+ * is read as a list of translators.
+ */
+export function parseTranslators(text: string): string[] {
+  return namesWithRole(text, /translat/i, true);
+}
+
+/** The narrators in StoryGraph's contributor line, in order. */
+export function parseNarrators(text: string): string[] {
+  return namesWithRole(text, /narrat|read by/i, false);
+}
+
+function namesWithRole(
+  text: string,
+  role: RegExp,
+  rolelessLineMeansRole: boolean,
+): string[] {
+  const line = (text ?? "").replace(/^\s*with\s+/i, "").trim();
+  const names: string[] = [];
+  const add = (name: string) => {
+    const clean = name.replace(/^\s*(?:and|&)\s+/i, "").trim();
+    if (clean && !names.includes(clean)) names.push(clean);
+  };
+  if (!line) return names;
+  if (!line.includes("(")) {
+    if (!rolelessLineMeansRole) return names;
+    for (const name of line.split(/,|\band\b|&/)) add(name);
+    return names;
+  }
+  const entry = /([^,()]+?)\s*\(([^)]*)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = entry.exec(line)) !== null) {
+    if (role.test(match[2])) add(match[1]);
+  }
+  return names;
+}
+
+const MONTHS: Record<string, string> = {
+  jan: "01",
+  feb: "02",
+  mar: "03",
+  apr: "04",
+  may: "05",
+  jun: "06",
+  jul: "07",
+  aug: "08",
+  sep: "09",
+  oct: "10",
+  nov: "11",
+  dec: "12",
+};
+
+/**
+ * A StoryGraph date ("26 Jun 1997", "Jun 1997", "1997") in the yyyy/mm/dd
+ * form Goodreads uses, so the two sources agree when they give the same date.
+ * "Not specified" and anything unrecognised come back empty.
+ */
+export function parseStoryGraphDate(text: string): string {
+  const value = (text || "").trim();
+  let m = /^(\d{1,2})\s+([a-z]{3})[a-z]*\.?\s+(\d{4})$/i.exec(value);
+  if (m && MONTHS[m[2].toLowerCase()]) {
+    return `${m[3]}/${MONTHS[m[2].toLowerCase()]}/${m[1].padStart(2, "0")}`;
+  }
+  m = /^([a-z]{3})[a-z]*\.?\s+(\d{4})$/i.exec(value);
+  if (m && MONTHS[m[1].toLowerCase()]) {
+    return `${m[2]}/${MONTHS[m[1].toLowerCase()]}`;
+  }
+  m = /^(\d{4})$/.exec(value);
+  return m ? m[1] : "";
+}
+
+/**
+ * StoryGraph's tags, split the way the page colours them: genres (teal),
+ * moods (pink) and pace ("fast-paced").
+ */
+export function splitStoryGraphTags(
+  tags: Array<{ text: string; className: string }>,
+): { categories: string; moods: string; pace: string } {
+  const genres: string[] = [];
+  const moods: string[] = [];
+  const pace: string[] = [];
+  for (const tag of tags) {
+    const value = tag.text.replace(/\s+/g, " ").trim();
+    if (!value || value.length > 40) continue;
+    const list = /-paced$/i.test(value)
+      ? pace
+      : /\bpink\b|text-pink/.test(tag.className)
+        ? moods
+        : genres;
+    if (!list.includes(value)) list.push(value);
+  }
+  return {
+    categories: genres.join(", "),
+    moods: moods.join(", "),
+    pace: pace.join(", "),
+  };
+}
+
+function htmlText(html: string): string {
+  return (html || "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<\/(?:div|p|li)>/gi, " ")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&#(\d+);/g, (_m, code: string) =>
+      String.fromCodePoint(Number(code)),
+    )
+    .replace(/&#x([0-9a-f]+);/gi, (_m, code: string) =>
+      String.fromCodePoint(parseInt(code, 16)),
+    )
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * A book page's description. The page shows 250 characters and keeps the
+ * whole text in the script behind its "Show More" link; that is read first,
+ * and the visible text only when there is no such script (a short
+ * description, shown whole).
+ */
+export function storyGraphDescription(html: string): string {
+  const scripts = (html || "").matchAll(/\.html\('((?:[^'\\]|\\.)*)'\)/g);
+  for (const script of scripts) {
+    const markup = script[1].replace(/\\(.)/g, (_m, c: string) =>
+      c === "n" ? "\n" : c === "t" ? " " : c === "r" ? "" : c,
+    );
+    if (!/>\s*Description\s*</i.test(markup)) continue;
+    const body = markup.replace(/<h4[^>]*>[\s\S]*?<\/h4>/i, "");
+    const text = htmlText(body);
+    if (text) return text;
+  }
+  const visible = /<p class="trix-content[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(
+    html || "",
+  );
+  return visible ? htmlText(visible[1]) : "";
+}
+
+/**
+ * Everything a StoryGraph book page says about its edition: title, series,
+ * authors, translators and narrators, page count, format, language,
+ * publisher, edition date, first publication, identifiers, genres, moods,
+ * pace, cover and the full description. Pure: reads the page's HTML text.
+ */
+export function parseStoryGraphBookPage(html: string, link: string): Book {
+  const page = html || "";
+  const block =
+    /class="book-title-author-and-series"[^>]*>([\s\S]*?)<\/div>/i.exec(
+      page,
+    )?.[1] || "";
+
+  const seriesMatch =
+    /<a href="\/series\/\d+"[^>]*>([^<]+)<\/a>(?:\s*<a href="\/series\/\d+"[^>]*>\s*#?([^<]*)<\/a>)?/i.exec(
+      block,
+    );
+  const title = htmlText(/<h3[^>]*>([\s\S]*?)<\/h3>/i.exec(block)?.[1] || "");
+
+  const people =
+    /<p class="font-body[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(block)?.[1] || "";
+  const withAt = people.search(/<span[^>]*>\s*with\s*<\/span>/i);
+  const authorPart = withAt >= 0 ? people.slice(0, withAt) : people;
+  const contributorLine = withAt >= 0 ? htmlText(people.slice(withAt)) : "";
+  const authors: string[] = [];
+  for (const m of authorPart.matchAll(/<a[^>]*>([^<]+)<\/a>/g)) {
+    const name = htmlText(m[1]);
+    if (name && !authors.includes(name)) authors.push(name);
+  }
+
+  const summary = htmlText(
+    /<p class='text-sm font-light[^']*'[^>]*>([\s\S]*?)<\/p>/i.exec(
+      page,
+    )?.[1] || "",
+  );
+
+  const info: Record<string, string> = {};
+  const infoBlock =
+    /class="[^"]*\bedition-info\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(
+      page,
+    )?.[1] || "";
+  for (const m of infoBlock.matchAll(
+    /<span class="font-semibold">\s*([^<:]+):\s*<\/span>\s*([^<]*)/g,
+  )) {
+    const key = m[1].trim().toLowerCase();
+    if (!(key in info)) info[key] = htmlText(m[2]);
+  }
+  const uid = (info["isbn/uid"] || "").replace(/[^0-9A-Z]/gi, "").toUpperCase();
+
+  const tagBlock =
+    /class="book-page-tag-section[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(
+      page,
+    )?.[1] || "";
+  const tags = [
+    ...tagBlock.matchAll(/<span class="([^"]*)"[^>]*>([^<]+)<\/span>/g),
+  ].map((m) => ({ className: m[1], text: htmlText(m[2]) }));
+
+  const tagFields = splitStoryGraphTags(tags);
+
+  const cover =
+    /<div class="book-cover[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/i.exec(
+      page,
+    )?.[1] || "";
+  const coverUrl = /placeholder-cover/i.test(cover) ? "" : cover;
+
+  const firstPub = /first pub (\d{3,4})/i.exec(summary)?.[1] || "";
+  const publisher = info["publisher"] || "";
+
+  return {
+    title,
+    author: authors[0] || "",
+    authors,
+    translator: parseTranslators(contributorLine)
+      .filter((name) => !authors.includes(name))
+      .join(", "),
+    narrator: parseNarrators(contributorLine).join(", "),
+    series: htmlText(seriesMatch?.[1] || ""),
+    seriesNumber: (seriesMatch?.[2] || "").trim(),
+    totalPage: /(\d[\d,]*)\s+pages/i.exec(summary)?.[1].replace(/,/g, "") || "",
+    format: info["format"] || "",
+    language: info["language"] || "",
+    publisher: /^not specified$/i.test(publisher) ? "" : publisher,
+    publishDate: parseStoryGraphDate(info["edition pub date"] || ""),
+    firstPublishDate: firstPub,
+    isbn13: /^97[89]\d{10}$/.test(uid) ? uid : "",
+    isbn10: /^\d{9}[\dX]$/.test(uid) ? uid : "",
+    asin: /^B0[0-9A-Z]{8}$/.test(uid) ? uid : "",
+    categories: tagFields.categories,
+    category: tagFields.categories,
+    moods: tagFields.moods,
+    pace: tagFields.pace,
+    coverUrl,
+    coverSmallUrl: coverUrl,
+    description: storyGraphDescription(page),
+    link,
+    previewLink: link,
+  };
+}
+
 export class StoryGraphApi implements BaseBooksApiImpl {
   static readonly SCRAPER_VERSION = "2026-05-13";
 
@@ -94,12 +338,12 @@ export class StoryGraphApi implements BaseBooksApiImpl {
     return this.login
       ? new ProviderBlockedError("storygraph", status, retryInMs, {
           message:
-            "StoryGraph did not accept your login; it has probably expired. Sign in to StoryGraph in your browser and copy fresh cookies into the plugin settings (StoryGraph login).",
+            "StoryGraph did not accept your login; it has probably expired. Sign in to StoryGraph in your browser and copy fresh cookies into Settings → Global Book Search → Sources → StoryGraph.",
           shortReason: "login not accepted",
         })
       : new ProviderBlockedError("storygraph", status, retryInMs, {
           message:
-            "StoryGraph only answers signed-in requests. Add your StoryGraph login in the plugin settings (StoryGraph login) to search it.",
+            "StoryGraph only answers signed-in requests. Add your StoryGraph login in Settings → Global Book Search → Sources → StoryGraph to search it.",
           shortReason: "sign-in needed",
         });
   }
@@ -208,6 +452,11 @@ export class StoryGraphApi implements BaseBooksApiImpl {
   }
 
   async getBook(book: Book): Promise<Book> {
+    // The page of the edition the user picked has everything about that
+    // edition in one request; the editions list is only a fallback.
+    const fromPage = await this.fetchBookPage(book);
+    if (fromPage) return fromPage;
+
     try {
       const editionsUrl = `${book.link}/editions`;
       const editionsRes = await httpRequest(
@@ -266,6 +515,35 @@ export class StoryGraphApi implements BaseBooksApiImpl {
         console.warn("StoryGraph getBook error", error);
       }
       return book;
+    }
+  }
+
+  /** The picked edition, read from its own page, or null when that fails. */
+  private async fetchBookPage(book: Book): Promise<Book | null> {
+    if (!book.link || !isStoryGraphUrl(book.link)) return null;
+    try {
+      const res = await httpRequest(
+        { url: book.link, method: "GET", headers: this.headersFor(book.link) },
+        { providerId: "storygraph", purpose: "book", rejectOnChallenge: true },
+      );
+      if (isSignInPage(res.text)) return null;
+      const page = parseStoryGraphBookPage(res.text, book.link);
+      if (!page.title) return null;
+      const merged: Record<string, unknown> = { ...book };
+      for (const [key, value] of Object.entries(page)) {
+        const empty =
+          value === undefined ||
+          value === null ||
+          (typeof value === "string" && !value.trim()) ||
+          (Array.isArray(value) && value.length === 0);
+        if (!empty) merged[key] = value;
+      }
+      return merged as unknown as Book;
+    } catch (error) {
+      if (!(error instanceof ProviderBlockedError)) {
+        console.warn("StoryGraph book page failed", error);
+      }
+      return null;
     }
   }
 
@@ -402,26 +680,13 @@ export class StoryGraphApi implements BaseBooksApiImpl {
         if (a && !authors.includes(a)) authors.push(a);
       });
 
-    // ── Translator / Contributors ───────────────────────────────────────────
-    let translator = "";
-    // Check span.hidden.contributor-names (for search results)
-    const contributorSpan = desktopLayout.querySelector(
-      "span.hidden.contributor-names",
-    );
-    if (contributorSpan) {
-      const rawContributor = this.text(contributorSpan);
-      translator = rawContributor
-        .replace(/^with\s+/i, "")
-        .replace(/\s*\(Translator\)\s*$/i, "")
-        .trim();
-    }
-    // Check links directly (for /editions or details page)
-    paneEl.querySelectorAll("span.hidden.contributor-names a").forEach((el) => {
-      const name = this.text(el);
-      if (name && !authors.includes(name)) {
-        translator = name;
-      }
-    });
+    // ── Translators ─────────────────────────────────────────────────────────
+    // Every translator StoryGraph lists, in order, and nobody in another role.
+    const translator = parseTranslators(
+      this.text(paneEl.querySelector("span.hidden.contributor-names")),
+    )
+      .filter((name) => !authors.includes(name))
+      .join(", ");
 
     // ── Edition metadata ────────────────────────────────────────────────────
     let isbn10 = "";
@@ -429,6 +694,9 @@ export class StoryGraphApi implements BaseBooksApiImpl {
     let publisher = "";
     let publishDate = "";
     let totalPage = "";
+    let format = "";
+    let language = "";
+    let firstPublishDate = "";
 
     // Parse labels like "ISBN/UID", "Publisher", "Edition Pub Date"
     paneEl.querySelectorAll(".edition-info p").forEach((p) => {
@@ -444,13 +712,19 @@ export class StoryGraphApi implements BaseBooksApiImpl {
         if (digits.length === 13) isbn13 = digits;
         else if (digits.length === 10) isbn10 = digits;
       } else if (key.includes("publisher")) {
-        publisher = value;
+        publisher = /^not specified$/i.test(value) ? "" : value;
+      } else if (key.includes("original pub")) {
+        firstPublishDate = parseStoryGraphDate(value);
       } else if (
         key.includes("edition pub date") ||
         key.includes("edition published") ||
         key.includes("pub date")
       ) {
-        publishDate = value;
+        publishDate = parseStoryGraphDate(value);
+      } else if (key === "format") {
+        format = value;
+      } else if (key === "language") {
+        language = value;
       }
     });
 
@@ -480,20 +754,18 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       if (pageMatch) totalPage = pageMatch[1];
     }
 
-    // Genre/Categories from tags
-    const genreSet = new Set<string>();
-    const genreSelectors = [
-      ".book-pane-tag-section span.inline-block",
-      ".book-pane-tag-section a",
-      "span.inline-block.book-pane-tag",
-    ];
-    genreSelectors.forEach((sel) => {
-      paneEl.querySelectorAll(sel).forEach((el) => {
-        const cat = this.text(el);
-        if (cat && cat.length < 30) genreSet.add(cat);
-      });
-    });
-    const categories = Array.from(genreSet).join(", ");
+    // Genres, moods and pace from the tags, told apart by their colour.
+    const tagEls = Array.from(
+      paneEl.querySelectorAll(
+        ".book-pane-tag-section span.inline-block, .book-pane-tag-section a, span.inline-block.book-pane-tag",
+      ),
+    );
+    const { categories, moods, pace } = splitStoryGraphTags(
+      tagEls.map((el) => ({
+        text: this.text(el),
+        className: el.getAttribute("class") || "",
+      })),
+    );
 
     // ── Cover ───────────────────────────────────────────────────────────────
     const coverWrapper = desktopLayout.querySelector(".book-cover");
@@ -533,6 +805,11 @@ export class StoryGraphApi implements BaseBooksApiImpl {
       isbn10,
       isbn13,
       translator,
+      format,
+      language,
+      firstPublishDate,
+      moods,
+      pace,
     };
   }
 }

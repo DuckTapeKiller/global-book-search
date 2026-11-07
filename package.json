@@ -32,8 +32,8 @@
     "test": "jest",
     "format": "prettier --write \"**/*.ts\"",
     "format:check": "prettier --check \"**/*.ts\"",
-    "lint": "npm run format:check && eslint src && tsc --noEmit --skipLibCheck",
-    "lint:fix": "npm run format && eslint src --fix",
+    "lint": "npm run format:check && eslint . --max-warnings=0 && tsc --noEmit --skipLibCheck",
+    "lint:fix": "npm run format && eslint . --fix",
     "build": "npm run lint && node esbuild.config.mjs production",
     "release": "standard-version",
     "release-test": "standard-version --dry-run",
@@ -45,25 +45,28 @@
     "deploy:pages": "gh-pages -d pages"
   },
   "devDependencies": {
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
     "@eslint/js": "^9.39.2",
     "@popperjs/core": "^2.11.8",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.12.7",
     "esbuild": "0.26.0",
     "eslint": "^9.39.2",
-    "eslint-plugin-obsidianmd": "^0.3.0",
+    "eslint-plugin-obsidianmd": "^0.5.1",
     "gh-pages": "^6.3.0",
     "globals": "^17.0.0",
     "husky": "^9.0.11",
     "jest": "^29.7.0",
-    "obsidian": "1.8.7",
+    "obsidian": "1.14.4",
     "prettier": "3.8.3",
     "standard-version": "^9.5.0",
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
     "tslib": "2.6.2",
     "typescript": "5.1.6",
-    "typescript-eslint": "^8.52.0"
+    "typescript-eslint": "^8.52.0",
+    "yaml": "2.9.0"
   },
   "dependencies": {
     "html5-qrcode": "^2.3.8"

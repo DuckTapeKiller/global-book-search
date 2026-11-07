@@ -49,7 +49,9 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
     const meta = [];
     if (book.author) meta.push(book.author);
     if (book.publisher) meta.push(book.publisher);
-    if (book.publishDate) meta.push(book.publishDate);
+    // A book that is not an edition yet (Hardcover) shows when it first came out.
+    const date = book.publishDate || book.firstPublishDate;
+    if (date) meta.push(date);
     if (book.totalPage) meta.push(`${book.totalPage}p`);
 
     textInfo.createEl("small", {
@@ -62,7 +64,7 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
     if (book._isInVault) {
       sourceContainer.createSpan({
         cls: "book-search-plugin__badge vault-badge",
-        text: "In Vault",
+        text: "In vault",
       });
     }
 
@@ -75,7 +77,7 @@ export class GlobalSuggestModal extends SuggestModal<BookWithSource> {
 
     book._sourceIds.forEach((id, index) => {
       const label = book._sourceLabels[index] || id;
-      sourceContainer.createEl("span", {
+      sourceContainer.createSpan({
         text: label,
         cls: `book-source-badge book-source-badge--${id}`,
       });

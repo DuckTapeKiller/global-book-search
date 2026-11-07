@@ -99,3 +99,43 @@ describe("globalSearch with a blocked provider", () => {
     }
   });
 });
+
+describe("globalSearch onSourceDone", () => {
+  it("reports each source once: found, empty or failed with its reason", async () => {
+    mockedFactory.mockImplementation((_settings: unknown, id: string) => ({
+      getByQuery: () => {
+        if (id === "storygraph") {
+          return Promise.reject(
+            new ProviderBlockedError("storygraph", 403, 0, {
+              shortReason: "sign-in needed",
+            }),
+          );
+        }
+        if (id === "google") return Promise.reject(new Error("boom"));
+        return Promise.resolve(id === "goodreads" ? [goodreadsBook] : []);
+      },
+    }));
+    const done: Array<[string, string, string | undefined]> = [];
+    const warn = jest
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    try {
+      await globalSearch("dune", settings, {
+        onSourceDone: (id, outcome, reason) => done.push([id, outcome, reason]),
+      });
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(done).toEqual(
+      expect.arrayContaining([
+        ["goodreads", "found", undefined],
+        ["openlibrary", "empty", undefined],
+        ["storygraph", "failed", "sign-in needed"],
+        ["google", "failed", undefined],
+      ]),
+    );
+    const ids = done.map(([id]) => id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

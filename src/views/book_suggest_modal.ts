@@ -55,11 +55,13 @@ export class BookSuggestModal extends SuggestModal<Book> {
       });
     }
 
-    const textContainer = el.createEl("div", { cls: "book-text-info" });
-    textContainer.createEl("div", { text: book.title });
+    const textContainer = el.createDiv({ cls: "book-text-info" });
+    textContainer.createDiv({ text: book.title });
 
     const publisher = book.publisher ? `, ${book.publisher}` : "";
-    const publishDate = book.publishDate ? `(${book.publishDate})` : "";
+    // A book that is not an edition yet (Hardcover) shows when it first came out.
+    const date = book.publishDate || book.firstPublishDate;
+    const publishDate = date ? `(${date})` : "";
     const totalPage = book.totalPage ? `, p${book.totalPage}` : "";
     const subtitle = `${book.author}${publisher}${publishDate}${totalPage}`;
     textContainer.createEl("small", { text: subtitle });

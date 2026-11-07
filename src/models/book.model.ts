@@ -26,12 +26,22 @@ export interface Book {
   narrator?: string;
   asin?: string;
 
+  // Edition and work details from Goodreads.
+  format?: string; // the edition's format: "Paperback", "Kindle Edition", "Audible Audio"
+  language?: string; // the edition's language: "English", "Spanish"
+  firstPublishDate?: string; // when the work first came out, as yyyy/mm/dd (or just the year)
+
+  // StoryGraph's moods ("adventurous, dark") and pace ("fast-paced").
+  moods?: string;
+  pace?: string;
+
   // Populated by plugin, not APIs
   tags?: string[];
   localCoverImage?: string;
 
-  // LibraryThing "Common Knowledge" fields. Available as template variables
-  // (e.g. {{characters}}); not part of the default frontmatter template.
+  // LibraryThing "Common Knowledge" fields (characters and places also come
+  // from Goodreads). Available as template variables (e.g. {{characters}});
+  // not part of the default frontmatter template.
   characters?: string;
   places?: string;
   events?: string;

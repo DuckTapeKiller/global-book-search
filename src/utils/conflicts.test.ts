@@ -64,6 +64,40 @@ describe("groupConflictValues", () => {
     expect(choices.map((c) => c.value)).toEqual(["Cixin Liu", "Liu Cixin"]);
   });
 
+  it("marks as most frequent the value most sources gave, not the preferred one", () => {
+    const choices = groupConflictValues([
+      { value: "Liu Cixin", source: "Goodreads", isQuorum: true },
+      { value: "Cixin Liu", source: "StoryGraph", isQuorum: false },
+      { value: "Cixin Liu", source: "Hardcover", isQuorum: false },
+    ]);
+    expect(choices).toEqual([
+      { value: "Liu Cixin", sources: ["Goodreads"], isQuorum: false },
+      {
+        value: "Cixin Liu",
+        sources: ["StoryGraph", "Hardcover"],
+        isQuorum: true,
+      },
+    ]);
+  });
+
+  it("marks nothing as most frequent on a tie", () => {
+    const choices = groupConflictValues([
+      { value: "2014/11/11", source: "Goodreads", isQuorum: true },
+      { value: "11 Nov 2014", source: "StoryGraph", isQuorum: false },
+      { value: "2006", source: "Hardcover", isQuorum: false },
+    ]);
+    expect(choices.map((c) => c.isQuorum)).toEqual([false, false, false]);
+  });
+
+  it("counts a source once, however often it repeats a value", () => {
+    const choices = groupConflictValues([
+      { value: "472", source: "Goodreads", isQuorum: true },
+      { value: "472", source: "Goodreads", isQuorum: true },
+      { value: "399", source: "StoryGraph", isQuorum: false },
+    ]);
+    expect(choices.map((c) => c.isQuorum)).toEqual([false, false]);
+  });
+
   it("does not repeat a source", () => {
     const choices = groupConflictValues([
       { value: "399", source: "Goodreads", isQuorum: false },

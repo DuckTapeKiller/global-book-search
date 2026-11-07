@@ -10,24 +10,33 @@ export interface ParsedSeriesTitle {
 
 /**
  * Goodreads writes a book's series after its title: "The Colour of Magic
- * (Discworld, #1)", "Dune (Dune Chronicles #1)", "Omnibus (Series, #1-3)".
- * A "#number" is required so an ordinary parenthesis such as "(Special
- * Edition)" is never mistaken for a series.
+ * (Discworld, #1)", "Dune (Dune Chronicles #1)", "Omnibus (Series, #1-3)". A
+ * book in several series lists them all, the main series first: "Mort
+ * (Discworld, #4; Death, #1)". A "#number" is required so an ordinary
+ * parenthesis such as "(Special Edition)" is never mistaken for a series.
  */
-const TRAILING_SERIES =
-  /^(.+?)\s*\(\s*([^()]+?)\s*,?\s*#\s*(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*\)\s*$/;
+const TRAILING_PARENTHESIS = /^(.+?)\s*\(([^()]+)\)\s*$/;
+const SERIES_ENTRY =
+  /^(.+?)\s*,?\s*#\s*(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)$/;
 
 export function parseSeriesFromTitle(
   rawTitle: string,
 ): ParsedSeriesTitle | null {
-  const match = TRAILING_SERIES.exec((rawTitle ?? "").trim());
+  const match = TRAILING_PARENTHESIS.exec((rawTitle ?? "").trim());
   if (!match) return null;
-  const [, title, series, number] = match;
-  return {
-    title: title.trim(),
-    series: series.trim(),
-    seriesNumber: number.replace(/\s+/g, "").replace("–", "-"),
-  };
+  const [, title, inside] = match;
+  // The first numbered entry: the main series when there are several.
+  for (const entry of inside.split(";")) {
+    const series = SERIES_ENTRY.exec(entry.trim());
+    if (series) {
+      return {
+        title: title.trim(),
+        series: series[1].trim(),
+        seriesNumber: series[2].replace(/\s+/g, "").replace("–", "-"),
+      };
+    }
+  }
+  return null;
 }
 
 /** `{ series, seriesNumber }` when the title carries a series suffix, else `{}`. */

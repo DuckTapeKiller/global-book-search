@@ -25,20 +25,27 @@ export interface ConflictChoice {
 /**
  * One choice per distinct value, naming every source that gave it, so two
  * sources that agree are shown as one card rather than two identical ones.
+ *
+ * A choice is the most frequent only when more sources gave it than any other
+ * value; a tie marks none. The incoming `isQuorum` flags are not used: they
+ * mark the value the merge preferred, which the window preselects instead.
  */
 export function groupConflictValues(
   values: FieldConflict["values"],
 ): ConflictChoice[] {
   const choices = new Map<string, ConflictChoice>();
-  for (const { value, source, isQuorum } of values) {
+  for (const { value, source } of values) {
     const key = comparableValue(value);
     const existing = choices.get(key);
     if (existing) {
       if (!existing.sources.includes(source)) existing.sources.push(source);
-      existing.isQuorum = existing.isQuorum || isQuorum;
     } else {
-      choices.set(key, { value, sources: [source], isQuorum });
+      choices.set(key, { value, sources: [source], isQuorum: false });
     }
   }
-  return [...choices.values()];
+  const grouped = [...choices.values()];
+  const most = Math.max(0, ...grouped.map((choice) => choice.sources.length));
+  const leaders = grouped.filter((choice) => choice.sources.length === most);
+  if (leaders.length === 1) leaders[0].isQuorum = true;
+  return grouped;
 }

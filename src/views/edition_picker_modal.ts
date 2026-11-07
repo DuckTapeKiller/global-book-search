@@ -1,5 +1,6 @@
 import { Modal, App, Setting } from "obsidian";
 import { BookEdition } from "@models/accuracy.model";
+import { GLOBAL_SEARCH_SOURCE_LABELS } from "@src/constants";
 
 export class EditionPickerModal extends Modal {
   constructor(
@@ -15,7 +16,7 @@ export class EditionPickerModal extends Modal {
     const { contentEl } = this;
     this.modalEl.addClass("book-search-accuracy-modal");
 
-    contentEl.createEl("h2", { text: "Select Edition" });
+    contentEl.createEl("h2", { text: "Select edition" });
     contentEl.createEl("p", {
       text: `Multiple editions found for "${this.bookTitle}". Please pick the one that matches your book for the most accurate metadata.`,
       cls: "modal-description",
@@ -44,13 +45,17 @@ export class EditionPickerModal extends Modal {
       });
 
       if (idx === 0) {
-        infoEl.createEl("div", {
+        infoEl.createDiv({
           text: "Recommended",
           cls: "edition-recommended",
         });
       }
 
+      // The edition's own title and language tell a translation from the
+      // original at a glance; an ISBN alone does not.
       const metadataStr = [
+        edition.title,
+        edition.language,
         edition.publisher,
         edition.publishDate,
         edition.totalPage ? `${edition.totalPage} pages` : null,
@@ -58,19 +63,19 @@ export class EditionPickerModal extends Modal {
         .filter(Boolean)
         .join(" • ");
 
-      infoEl.createEl("div", { text: metadataStr, cls: "edition-meta" });
-      infoEl.createEl("div", {
+      infoEl.createDiv({ text: metadataStr, cls: "edition-meta" });
+      infoEl.createDiv({
         text: `Score: ${edition.score ?? 0}`,
         cls: "edition-score",
       });
-      infoEl.createEl("div", {
-        text: `Source: ${edition._providerId}`,
+      infoEl.createDiv({
+        text: `Source: ${GLOBAL_SEARCH_SOURCE_LABELS[edition._providerId] || edition._providerId}`,
         cls: "edition-source-tag",
       });
 
       new Setting(itemEl).addButton((btn) => {
         btn
-          .setButtonText("Select Edition")
+          .setButtonText("Select edition")
           .setCta()
           .onClick(() => {
             this.onSubmit(edition);

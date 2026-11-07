@@ -147,7 +147,7 @@ export default class BookSearchPlugin extends Plugin {
 
     this.addCommand({
       id: "search-calibre",
-      name: "Search Calibre (Multi-Select)",
+      name: "Search Calibre (multi-select)",
       callback: () => {
         void this.createMultipleCalibreNotes().catch((err) =>
           console.warn(err),
@@ -157,7 +157,7 @@ export default class BookSearchPlugin extends Plugin {
 
     this.addCommand({
       id: "search-openlibrary",
-      name: "Search OpenLibrary",
+      name: "Search Open Library",
       callback: () => {
         void this.createNewBookNote("openlibrary").catch((err) =>
           console.warn(err),
@@ -232,7 +232,7 @@ export default class BookSearchPlugin extends Plugin {
 
     this.addCommand({
       id: "browse-calibre",
-      name: "Browse Calibre Library",
+      name: "Browse Calibre library",
       callback: () => {
         void this.browseCalibreLibrary().catch((err) => console.warn(err));
       },
@@ -240,7 +240,7 @@ export default class BookSearchPlugin extends Plugin {
 
     this.addCommand({
       id: "search-all",
-      name: "Global Search (all sources)",
+      name: "Global search (all sources)",
       callback: () => {
         void this.createNewBookNoteGlobal().catch((err) => console.warn(err));
       },
@@ -437,7 +437,7 @@ export default class BookSearchPlugin extends Plugin {
   async checkStoryGraphLogin(): Promise<string> {
     const login = storyGraphLogin(await this.resolveProviderSettings());
     if (!login) {
-      return "No StoryGraph login is saved yet (Settings → Global Book Search → StoryGraph login).";
+      return "No StoryGraph login is saved yet. Add it in Settings → Global Book Search → Sources → StoryGraph.";
     }
     clearHttpCache();
     try {
@@ -894,7 +894,7 @@ export default class BookSearchPlugin extends Plugin {
     if (adopted.length === 0) return;
 
     this.applyRuntimeHttpConfig();
-    if (this.settingTab?.containerEl.isShown()) this.settingTab.display();
+    this.settingTab?.refresh();
   }
 
   onunload() {

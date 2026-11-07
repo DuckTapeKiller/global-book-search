@@ -51,7 +51,7 @@ Search one source or all of them at once, pick the book, and get a note with its
 
 1. Install **Global Book Search** from **Settings → Community plugins** (see [Installation](#installation)).
 2. Open **Settings → Global Book Search → Notes** and choose the folder for book notes and a frontmatter **Language**.
-3. Click the book icon in the ribbon, or run **Global Search (all sources)** from the command palette, type a title or ISBN and pick a result.
+3. Click the book icon in the ribbon, or run **Global search (all sources)** from the command palette, type a title or ISBN and pick a result.
 
 Goodreads and Open Library work straight away. For the other sources, see [Sources](#sources): each needs a key or a login that takes a minute or two to set up, and the settings explain every step.
 
@@ -59,17 +59,42 @@ Goodreads and Open Library work straight away. For the other sources, see [Sourc
 
 | Source | Setup | What it is good for |
 | --- | --- | --- |
-| **Goodreads** | None | Rich metadata, series, original titles, genres, ASINs. |
-| **Open Library** | None | Open data, ISBN lookups, covers. |
+| **Goodreads** | None | The most complete source: translators, original titles, first publication, series, genres, characters, places, ASINs. |
+| **Open Library** | None | The exact edition an ISBN names, often with its original title and translator; open data and covers. |
 | **Google Books** | None; a free API key is recommended | Descriptions, categories, a wide catalogue in many languages. |
-| **StoryGraph** | Your StoryGraph login | Translators, specific editions, moods and pace. |
-| **Hardcover** | A personal API token | A modern catalogue with editions in your language. |
-| **LibraryThing** | A developer key | Common Knowledge: characters, places, first words, dedications and more. |
+| **StoryGraph** | Your StoryGraph login | The exact edition you pick, with its series, translators, full description, moods and pace. |
+| **Hardcover** | A personal API token | The exact edition an ISBN names, with its translators, narrators, language and format; editions in your language when you search by title. |
+| **LibraryThing** | A free API token | Common Knowledge: characters, places, first words, dedications and more. |
 | **Calibre** | Calibre's content server | Your own library, searched or browsed. |
 
 Fable and the Library of Congress can also supply a few fields; they are used only for the fields where you choose them under **Search & merging**.
 
-The Hardcover token, the LibraryThing key and the StoryGraph login are kept in Obsidian's secret storage (**Settings → Keychain**), not in your vault's files. In **Settings → Global Book Search → Sources**, every source that needs setting up has a status label, a step-by-step guide and, where possible, a test button.
+### What each source provides
+
+Every note starts from the same default set of values: title, authors, translator, publisher, dates, pages, ISBNs, description and cover. The sources differ in which of those they have, and some provide more: moods and pace, characters and places, first words and dedications. Each value is a template variable, so a note shows it only when your template has the variable.
+
+| Variable | Goodreads | StoryGraph | Hardcover | Open Library | Google Books | LibraryThing |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| `{{title}}`, `{{author}}`, `{{publisher}}`, `{{publishDate}}`, `{{totalPage}}`, `{{isbn13}}`, `{{coverUrl}}` | ✓ | ✓ | ✓ | ✓ | ✓ | some |
+| `{{description}}` | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| `{{categories}}` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `{{translator}}`, `{{narrator}}` | ✓ | ✓ | ✓ | some | – | – |
+| `{{originalTitle}}` | ✓ | – | – | some | – | – |
+| `{{firstPublishDate}}` | ✓ | year | ✓ | – | – | – |
+| `{{language}}`, `{{format}}` | ✓ | ✓ | ✓ | ✓ | – | – |
+| `{{series}}`, `{{seriesNumber}}` | ✓ | ✓ | ✓ | – | – | – |
+| `{{asin}}` | ✓ | ✓ | ✓ | – | – | – |
+| `{{moods}}` | – | ✓ | ✓ | – | – | – |
+| `{{pace}}` | – | ✓ | – | – | – | – |
+| `{{characters}}` | ✓ | – | ✓ | – | – | ✓ |
+| `{{places}}` | ✓ | – | – | – | – | ✓ |
+| `{{firstWords}}`, `{{lastWords}}`, `{{quotes}}`, `{{dedication}}`, `{{events}}`, `{{blurbers}}`, `{{relatedMovies}}`, `{{originalLanguage}}` | – | – | – | – | – | ✓ |
+
+"Some" means the source has the value for some books only. Calibre fills what your own library holds.
+
+**How the plugin chooses.** A search in one source fills the note from that source alone. A global search asks every source about the edition you chose and takes each value from the first source in its order under **Settings → Global Book Search → Search & merging** that has it. Values without an order there come from the source you chose, then Goodreads, StoryGraph, Google Books, Open Library and the rest. When sources disagree on the title, author, publisher, date, pages or categories, you see the options side by side and choose.
+
+The Hardcover token, the LibraryThing token and the StoryGraph login are kept in Obsidian's secret storage (**Settings → Keychain**), not in your vault's files. In **Settings → Global Book Search → Sources**, every source that needs setting up has a status label, a step-by-step guide and, where possible, a test button.
 
 <p align="center">
   <img src="screenshots/settings-sources.png" alt="Source settings with status labels" width="720"><br>
@@ -107,10 +132,12 @@ When they expire, the plugin says StoryGraph did not accept the login; repeat th
 
 Google Books works without a key, but the free quota it shares with every user often runs out (HTTP 429). Your own key avoids that.
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/) and choose or create a project.
-2. Go to **APIs & Services → Library**, search for **Books API** and enable it.
-3. Go to **APIs & Services → Credentials** and choose **Create credentials → API key**.
+1. Open the [Credentials page](https://console.cloud.google.com/apis/credentials) of Google Cloud Console, and choose or create a project if it asks.
+2. Choose **Create credentials → API key** and copy the key.
+3. Optionally choose **Restrict key**: if **Books API** is listed under API restrictions, select it; otherwise leave the key unrestricted.
 4. Paste the key into **Sources → Google Books → API key** and press **Save key**.
+
+You don't need to find the API in the API Library. Google lists it as "Books API", and its documentation says to skip enabling it when it isn't listed.
 
 </details>
 
@@ -124,11 +151,15 @@ Google Books works without a key, but the free quota it shares with every user o
 </details>
 
 <details>
-<summary><strong>LibraryThing: add a developer key</strong></summary>
+<summary><strong>LibraryThing: add your API token</strong></summary>
 
-1. Sign in to LibraryThing; a free account is enough.
-2. Open [librarything.com/services/keys.php](https://www.librarything.com/services/keys.php) and copy your developer key.
-3. In **Sources → LibraryThing**, click **Link…**, create a secret and paste the key, then press **Test**.
+The plugin searches LibraryThing through its Talpa Search API, which needs a free API token.
+
+1. Sign in to [LibraryThing](https://www.librarything.com), or create a free account.
+2. Open the [Developer Hub](https://www.librarything.com/developer) while signed in and copy your API token.
+3. In **Sources → LibraryThing**, click **Link…**, create a secret and paste the token, then press **Test**.
+
+The free token allows 50 searches a day, one per second; for more, LibraryThing asks you to write to talpa@librarything.com.
 
 LibraryThing sometimes answers automated requests for its book pages with a "High traffic" page; the Common Knowledge variables can then come out empty.
 
@@ -136,19 +167,19 @@ LibraryThing sometimes answers automated requests for its book pages with a "Hig
 
 ## How a note is built
 
-When you pick a result in **Global Search (all sources)**:
+When you pick a result in **Global search (all sources)**:
 
 <p align="center">
-  <img src="screenshots/global-search.png" alt="Global search results from Goodreads, Open Library and StoryGraph" width="640"><br>
-  <sub>One search, every source: each result is labelled with where it came from.</sub>
+  <img src="screenshots/global-search.png" alt="Global search results from Goodreads, Open Library, StoryGraph and Hardcover" width="640"><br>
+  <sub>One search, every source: each result is labelled with every source that found it.</sub>
 </p>
 
 1. **Edition.** If the book has several editions with different ISBNs, you choose one.
-2. **ISBN.** If the chosen result has no ISBN, the plugin looks the book up by title and author in Goodreads, Open Library and Google Books (and Hardcover and LibraryThing when set up) until one of them has it.
+2. **ISBN.** If the chosen edition has no ISBN (Goodreads keeps some of its best-known editions without one), the plugin looks for its twin: the same title, publisher, page count, binding and language, first in Goodreads' own list of the book's editions, then in Hardcover's and Open Library's (and Google Books' with an API key). It takes the ISBN only when exactly one edition matches; when two printings could be it, the note gets no ISBN rather than another edition's. A result that is a book rather than an edition takes the edition a source knows best.
 3. **Goodreads** is fetched by ISBN for its detailed metadata.
-4. **The other sources** are asked by ISBN at the same time: Google Books, StoryGraph and Open Library, plus Hardcover and LibraryThing when set up.
-5. **Merging.** For each field the plugin takes the value from the source you prefer (**Search & merging**). If sources disagree on the title, author, publisher, date, pages or categories, you see the options side by side and choose.
-6. **Duplicate check.** If a note for the book already exists, you can open it, update its metadata, create another anyway or cancel.
+4. **The other sources** are asked by ISBN at the same time: Google Books, StoryGraph and Open Library, plus Hardcover and LibraryThing when set up, including those that had found the book in the search. StoryGraph and Hardcover answer only for that exact edition.
+5. **Merging.** For each field the plugin takes the value from the source you prefer (**Search & merging**). If sources disagree on the title, author, publisher, date, pages or categories, you see the options side by side and choose: the value your preferences picked is already selected, and **Most frequent** marks the one that most sources gave.
+6. **Duplicate check.** If a note for the book already exists, you can open it, update its metadata, create another anyway or cancel. **Update metadata** refreshes only the properties your template fills in from the book: fixed values such as `Read: false` or an empty `Date read:` keep what you wrote, and a value the sources leave empty never erases one the note already has.
 7. **The note** is written from your template, the cover is saved to your vault (in Local cover mode), and Templater runs if you use it.
 
 <table>
@@ -204,11 +235,15 @@ Read: false
 | --- | --- |
 | `{{title}}`, `{{subtitle}}`, `{{originalTitle}}` | The edition's title and subtitle, and the original title of a translated work. |
 | `{{author}}`, `{{authors}}` | The first author, or all of them. |
-| `{{translator}}`, `{{narrator}}` | The translator (StoryGraph, Goodreads) and narrator. |
+| `{{translator}}`, `{{narrator}}` | The translators, however Goodreads, StoryGraph or Hardcover credits them ("Translator", "Traductor", "Translator, Introduction"…), and an audiobook's narrators. A translator that one source lists as an author is kept out of `{{authors}}` when another source credits them as the translator. |
 | `{{description}}` | The summary. |
-| `{{publisher}}`, `{{publishDate}}`, `{{totalPage}}` | Publisher, publication date and page count. |
+| `{{publisher}}`, `{{publishDate}}`, `{{totalPage}}` | The edition's publisher, publication date and page count. |
+| `{{firstPublishDate}}` | When the work first came out, such as `1980/09/01` for *The Name of the Rose* in any edition (Goodreads, Hardcover; StoryGraph gives the year). |
+| `{{language}}`, `{{format}}` | The edition's language and format, such as `Spanish` and `Paperback` or `Kindle Edition` (Goodreads, StoryGraph, Hardcover). |
+| `{{moods}}`, `{{pace}}` | StoryGraph's moods (`adventurous, dark`) and pace (`fast-paced`); Hardcover's readers' moods when StoryGraph has none. |
 | `{{isbn13}}`, `{{isbn10}}`, `{{asin}}` | Identifiers. |
 | `{{categories}}` | Genres and categories, separated by commas. |
+| `{{characters}}`, `{{places}}` | The book's characters, separated by commas, and its settings, separated by semicolons (Goodreads, LibraryThing; Hardcover's characters without spoilers). |
 | `{{series}}`, `{{seriesNumber}}`, `{{seriesLink}}` | The series, the book's position in it (`1`, `0.5`, `1-3`) and a `[[wikilink]]` to it. |
 | `{{localCoverImage}}`, `{{coverUrl}}` | The cover saved in your vault (a `[[wikilink]]` in Local mode, the address in Remote mode) and the cover's web address. |
 | `{{link}}` | The book's page at the source. |
@@ -217,7 +252,7 @@ Read: false
 <details>
 <summary><strong>LibraryThing Common Knowledge variables</strong></summary>
 
-Filled only when LibraryThing has the data, and empty for other sources: `{{characters}}`, `{{places}}`, `{{events}}`, `{{firstWords}}`, `{{lastWords}}`, `{{quotes}}`, `{{dedication}}`, `{{blurbers}}`, `{{relatedMovies}}` and `{{originalLanguage}}`.
+Filled only when LibraryThing has the data, and empty for other sources: `{{events}}`, `{{firstWords}}`, `{{lastWords}}`, `{{quotes}}`, `{{dedication}}`, `{{blurbers}}`, `{{relatedMovies}}` and `{{originalLanguage}}`. `{{characters}}` and `{{places}}` come from Goodreads as well. In a global search they are kept whichever source is primary.
 
 ```yaml
 Characters: "{{characters}}"
@@ -270,26 +305,26 @@ Cover: "{{localCoverImage:raw:url}}"   →  Cover: "images/foo%20bar.png"
 
 | Command | What it does |
 | --- | --- |
-| **Global Search (all sources)** | Search every source at once and build the note from all of them. |
+| **Global search (all sources)** | Search every source at once and build the note from all of them. |
 | **Create new book note** | Search your default source and create a note. |
 | **Insert the metadata** | Search, then insert the result into the note you are editing. |
-| **Search Goodreads**, **Google Books**, **OpenLibrary**, **StoryGraph**, **Hardcover**, **LibraryThing** | Search one source. |
-| **Search Calibre (Multi-Select)** | Find books in Calibre and import several at once. |
-| **Browse Calibre Library** | Browse Calibre by author, series or tag. |
+| **Search Goodreads**, **Google Books**, **Open Library**, **StoryGraph**, **Hardcover**, **LibraryThing** | Search one source. |
+| **Search Calibre (multi-select)** | Find books in Calibre and import several at once. |
+| **Browse Calibre library** | Browse Calibre by author, series or tag. |
 | **Bulk import from ISBN list** | Paste a list of ISBNs and create a note for each. |
-| **Test StoryGraph login**, **Test Hardcover connectivity**, **Test LibraryThing connectivity** | Check a login, token or key. |
+| **Test StoryGraph login**, **Test Hardcover connectivity**, **Test LibraryThing connectivity** | Check a login or token. |
 | **Clear search history** | Forget recent searches. |
 
-The ribbon's book icon opens a window with **Global Search**, **Calibre** and **Bulk Import**, and a button per source if you turn that on under **Sources**.
+The ribbon's book icon opens a window with **Global search**, **Calibre** and **Bulk import**, and a button per source if you turn that on under **Sources**.
 
 ## Settings
 
 <p align="center">
-  <img src="screenshots/settings-tabs.png" alt="The plugin settings, organised in tabs" width="720"><br>
-  <sub>Settings are grouped in five tabs.</sub>
+  <img src="screenshots/settings-pages.png" alt="The plugin settings, organised in five pages" width="720"><br>
+  <sub>Settings are grouped in five pages.</sub>
 </p>
 
-| Tab | What you set there |
+| Page | What you set there |
 | --- | --- |
 | **Notes** | Where notes go and how they are named, the frontmatter, template file and body, tags, series linking and covers. |
 | **Sources** | The default source, language and search options, and each source's key or login with a guide and a test button. |
@@ -297,12 +332,14 @@ The ribbon's book icon opens a window with **Global Search**, **Calibre** and **
 | **Diagnostics** | Network settings and how each source has performed over the last three days. |
 | **Support** | Ko-fi, bug reports and the installed version. |
 
+On Obsidian 1.13 and later the five pages are Obsidian's own settings pages, so every setting also turns up in Obsidian's settings search (try "cookie" or "series"). Older versions of Obsidian show the same pages as tabs.
+
 ## Calibre
 
 Turn on Calibre's content server (**Connect/share → Start Content server**, and **Preferences → Sharing over the net** to start it with Calibre), then enter its address and library ID under **Sources → Calibre**.
 
-- **Search Calibre (Multi-Select)** imports several books at once. With five or fewer, each is enriched from the online sources; with more, notes use Calibre's data alone, to keep the import quick.
-- **Browse Calibre Library** lists your library by author, series or tag and always uses Calibre's own data.
+- **Search Calibre (multi-select)** imports several books at once. With five or fewer, each is enriched from the online sources; with more, notes use Calibre's data alone, to keep the import quick.
+- **Browse Calibre library** lists your library by author, series or tag and always uses Calibre's own data.
 
 ## Mobile
 
@@ -315,7 +352,7 @@ The plugin runs on iOS and Android. A few things to know:
 ## Privacy and your data
 
 - The plugin talks only to the sources you use and the sites that host their covers, to Fable and the Library of Congress if you choose them, to your Calibre server, and, when a Goodreads or LibraryThing page is blocked, to the public archives `web.archive.org` and `archive.ph`. There is no analytics or tracking.
-- The Hardcover token, LibraryThing key and StoryGraph login live in Obsidian's secret storage and are sent only to their own services. The Google Books key is stored in the plugin's settings file (`data.json`).
+- The Hardcover token, LibraryThing token and StoryGraph login live in Obsidian's secret storage and are sent only to their own services. The Google Books key is stored in the plugin's settings file (`data.json`).
 - Settings are saved key by key, so the plugin never writes old values over settings changed on another device, and it leaves an unreadable settings file untouched.
 
 ## Troubleshooting

@@ -7,7 +7,12 @@ import { GoogleBooksApi } from "@apis/google_books_api";
 import { OpenLibraryApi } from "@apis/open_library_api";
 import { GoodreadsApi } from "@apis/goodreads_api";
 import { StoryGraphApi, storyGraphLogin } from "@apis/storygraph_api";
+import { HardcoverApi } from "@apis/hardcover_api";
 import { scoreBookCandidate } from "@utils/edition_score";
+import { samePerson } from "@utils/contributors";
+import { pickSameEdition, sameTitle } from "@utils/editions";
+import { toIsbn10, toIsbn13 } from "@utils/existing_note";
+import LANGUAGES from "@utils/languages";
 import { getArray, getProp } from "@utils/json";
 
 import {
@@ -25,6 +30,9 @@ export interface BookWithSource extends Book {
 }
 
 const PROVIDER_ORDER = ["goodreads", "google", "openlibrary", "storygraph"];
+
+/** How one source answered a global search. */
+export type SourceOutcome = "found" | "empty" | "failed";
 
 /** Render a field value as a comparable string without producing "[object Object]". */
 function comparableString(value: unknown): string {
@@ -225,6 +233,12 @@ export async function globalSearch(
     locale?: string;
     includeCalibre?: boolean;
     vaultIndex?: VaultIndexEntry[];
+    /** Called once per source as soon as it answers, fails or times out. */
+    onSourceDone?: (
+      providerId: string,
+      outcome: SourceOutcome,
+      reason?: string,
+    ) => void;
   },
   onProgress?: (message: string) => void,
 ): Promise<BookWithSource[]> {
@@ -253,6 +267,10 @@ export async function globalSearch(
       ]);
 
       onProgress?.(`${GLOBAL_SEARCH_SOURCE_LABELS[providerId]} ✓`);
+      options?.onSourceDone?.(
+        providerId,
+        providerResults.length > 0 ? "found" : "empty",
+      );
       return providerResults.map((book) => ({
         ...book,
         _sourceIds: [providerId],
@@ -263,10 +281,12 @@ export async function globalSearch(
         onProgress?.(
           `${GLOBAL_SEARCH_SOURCE_LABELS[providerId]} — ${error.shortReason}`,
         );
+        options?.onSourceDone?.(providerId, "failed", error.shortReason);
         return [] as BookWithSource[];
       }
       console.warn(`Global Search: Provider ${providerId} failed`, error);
       onProgress?.(`${GLOBAL_SEARCH_SOURCE_LABELS[providerId]} — no results`);
+      options?.onSourceDone?.(providerId, "failed");
       return [] as BookWithSource[];
     }
   });
@@ -338,7 +358,7 @@ export async function globalSearch(
 
   const finalResults = Array.from(workMap.values());
 
-  // Mark "In Vault" status
+  // Mark "In vault" status
   if (options?.vaultIndex) {
     finalResults.forEach((work) => {
       const editions = work._editions || [];
@@ -397,50 +417,70 @@ export async function enrichBookByISBN(
   // ── Step 2: Extract ISBN ───────────────────────────────────────────────────
   let isbn = book.isbn13 || book.isbn10;
 
-  // ── FALLBACK: If no ISBN, discover one by searching ANY provider by ─────────
-  // title/author. Tried in order until one yields an ISBN, so no single source
-  // (Goodreads) being down can break the chain.
+  // ── FALLBACK: no ISBN ─────────────────────────────────────────────────────
+  // An edition (a publisher, a page count, a binding) borrows only the ISBN of
+  // its twin in another catalogue, and only when exactly one record matches.
+  // A book that is not an edition yet takes the edition a source knows best.
   if (!isbn) {
-    const discoveryOrder = [
-      "goodreads",
-      "openlibrary",
-      "google",
-      "hardcover",
-      "librarything",
-    ]
-      .filter((id) => id !== primarySourceId)
-      .filter((id) => id !== "hardcover" || settings.hardcoverApiToken)
-      .filter((id) => id !== "librarything" || settings.librarythingApiKey);
+    const isEdition =
+      [book.publisher, book.totalPage, book.format].filter(
+        (value) => String(value ?? "").trim() !== "",
+      ).length >= 2;
+    if (isEdition) {
+      onProgress?.("No ISBN — looking for the same edition elsewhere...");
+      const twin = await findSameEdition(book, settings);
+      if (twin) {
+        isbn = toIsbn13(twin.isbn13 || twin.isbn10 || "");
+        book.isbn13 = isbn;
+        book.isbn10 = twin.isbn10 || toIsbn10(isbn) || book.isbn10;
+        const label =
+          GLOBAL_SEARCH_SOURCE_LABELS[twin.sourceProvider || ""] ||
+          "another catalogue";
+        onProgress?.(`ISBN found on ${label} ✓`);
+      }
+    } else {
+      const discoveryOrder = [
+        "goodreads",
+        "openlibrary",
+        "google",
+        "hardcover",
+        "librarything",
+      ]
+        .filter((id) => id !== primarySourceId)
+        .filter((id) => id !== "hardcover" || settings.hardcoverApiToken)
+        .filter((id) => id !== "librarything" || settings.librarythingApiKey);
 
-    for (const id of discoveryOrder) {
-      const label = GLOBAL_SEARCH_SOURCE_LABELS[id] || id;
-      onProgress?.(`No ISBN — searching ${label} by title...`);
-      try {
-        const api = factoryServiceProvider(settings, id);
-        const results = await Promise.race([
-          api.getByQuery(`${book.title} ${book.author}`),
-          timeoutReject<Book[]>(8000, `${id}-title-fallback`),
-        ]);
-        if (results.length === 0) continue;
-        // Use the first result as the most likely match.
-        const full = api.getBook
-          ? await Promise.race([
-              api.getBook(results[0]),
-              timeoutReject<Book>(12000, `${id}-title-fallback-book`),
-            ])
-          : results[0];
-        const foundIsbn = full.isbn13 || full.isbn10;
-        if (foundIsbn) {
-          isbn = foundIsbn;
-          book.isbn13 = full.isbn13 || book.isbn13;
-          book.isbn10 = full.isbn10 || book.isbn10;
-          // Reuse Goodreads' data downstream; others get re-queried by ISBN.
-          if (id === "goodreads") goodreadsData = full;
-          onProgress?.(`ISBN found on ${label} ✓`);
-          break;
+      for (const id of discoveryOrder) {
+        const label = GLOBAL_SEARCH_SOURCE_LABELS[id] || id;
+        onProgress?.(`No ISBN — searching ${label} by title...`);
+        try {
+          const api = factoryServiceProvider(settings, id);
+          const results = await Promise.race([
+            api.getByQuery(`${book.title} ${book.author}`),
+            timeoutReject<Book[]>(8000, `${id}-title-fallback`),
+          ]);
+          // The first result with the same title, never another book.
+          const match = results.find((r) => sameTitle(r.title, book.title));
+          if (!match) continue;
+          const full = api.getBook
+            ? await Promise.race([
+                api.getBook(match),
+                timeoutReject<Book>(12000, `${id}-title-fallback-book`),
+              ])
+            : match;
+          const foundIsbn = full.isbn13 || full.isbn10;
+          if (foundIsbn && sameTitle(full.title, book.title)) {
+            isbn = foundIsbn;
+            book.isbn13 = full.isbn13 || book.isbn13;
+            book.isbn10 = full.isbn10 || book.isbn10;
+            // Reuse Goodreads' data downstream; others get re-queried by ISBN.
+            if (id === "goodreads") goodreadsData = full;
+            onProgress?.(`ISBN found on ${label} ✓`);
+            break;
+          }
+        } catch (err) {
+          console.warn(`ISBN discovery via ${id} failed`, err);
         }
-      } catch (err) {
-        console.warn(`ISBN discovery via ${id} failed`, err);
       }
     }
   }
@@ -487,8 +527,12 @@ export async function enrichBookByISBN(
   // Hardcover + LibraryThing join the ISBN chain when configured.
   if (settings.hardcoverApiToken) secondaryProviderIds.push("hardcover");
   if (settings.librarythingApiKey) secondaryProviderIds.push("librarything");
+  // Every source but the one the book came from. The others that found the
+  // book in the search are asked too: the search result kept only one
+  // source's data, so leaving them out lost StoryGraph's moods and
+  // Hardcover's details whenever they had found the book as well.
   const activeSecondaryProviderIds = secondaryProviderIds.filter(
-    (id) => !sourceIds.includes(id),
+    (id) => id !== primarySourceId,
   );
 
   const secondaryResultsWithIds = await Promise.allSettled(
@@ -530,15 +574,48 @@ export async function enrichBookByISBN(
             const api = new OpenLibraryApi();
             const results = await Promise.race([
               api.getByQuery(`isbn:${isbn}`),
-              timeoutReject<Book[]>(8000, id),
+              timeoutReject<Book[]>(12000, id),
             ]);
-            return results[0] ? { book: results[0], providerId: id } : null;
+            const found = results[0];
+            // Some Open Library records carry another edition's ISBN (an
+            // Estonian translation filed under the Tor Three-Body Problem):
+            // an answer with another title is not this edition.
+            if (!found || !sameTitle(found.title, book.title)) return null;
+            // Its authors only when they are the book's (it names Miguel de
+            // Unamuno for Grossman's Don Quixote, "Fiódor Dostoievski" for
+            // Penguin's Crime and Punishment).
+            const authors = book.authors?.length ? book.authors : [book.author];
+            const ownAuthors = (found.authors || []).some((name) =>
+              authors.some((author) => samePerson(name, author)),
+            );
+            return {
+              book: ownAuthors ? found : { ...found, author: "", authors: [] },
+              providerId: id,
+            };
           }
 
-          if (id === "hardcover" || id === "librarything") {
-            // Use the factory so locale + token resolution are applied. These
-            // cluster editions by work, so the localised edition's ISBN may
-            // differ from the query ISBN — don't drop on a mismatch.
+          if (id === "hardcover") {
+            // Hardcover answers an ISBN with that edition, fully read; any
+            // other edition would bring another edition's title, translator
+            // and publisher into the merge.
+            const api = factoryServiceProvider(settings, id);
+            const results = await Promise.race([
+              api.getByQuery(isbn),
+              timeoutReject<Book[]>(8000, id),
+            ]);
+            const found = results[0];
+            const foundIsbn = found
+              ? toIsbn13(found.isbn13 || found.isbn10 || "")
+              : "";
+            if (!foundIsbn || foundIsbn !== toIsbn13(isbn)) return null;
+            return { book: found, providerId: id };
+          }
+
+          if (id === "librarything") {
+            // Use the factory so locale + token resolution are applied.
+            // LibraryThing clusters editions by work, so the localised
+            // edition's ISBN may differ from the query ISBN — don't drop on a
+            // mismatch.
             const api = factoryServiceProvider(settings, id);
             const results = await Promise.race([
               api.getByQuery(isbn),
@@ -679,6 +756,62 @@ export async function enrichBookByISBN(
     sources: [...new Set([primarySourceLabel, ...contributingSources])],
     conflicts,
   };
+}
+
+/** A language's name as a two-letter code ("English" → "en"), or "". */
+function languageCode(name: string): string {
+  const wanted = (name || "").trim().toLowerCase();
+  if (!wanted) return "";
+  const match = Object.entries(LANGUAGES).find(
+    ([code, label]) => code.length === 2 && label.toLowerCase() === wanted,
+  );
+  return match ? match[0] : "";
+}
+
+/**
+ * The record in another catalogue that is the same edition as a book without
+ * an ISBN: Hardcover's and Open Library's editions of the book, and Google
+ * Books' when there is an API key (its shared quota is used up otherwise).
+ * Null unless exactly one ISBN matches publisher, pages, binding and language.
+ */
+async function findSameEdition(
+  book: Book,
+  settings: BookSearchPluginSettings,
+): Promise<Book | null> {
+  const lookups: Array<Promise<Book[]>> = [
+    Promise.race([
+      new OpenLibraryApi().editionsLike(book),
+      timeoutReject<Book[]>(10000, "openlibrary-editions"),
+    ]),
+  ];
+  if (settings.hardcoverApiToken) {
+    lookups.push(
+      Promise.race([
+        new HardcoverApi(settings.hardcoverApiToken).editionsLike(book),
+        timeoutReject<Book[]>(10000, "hardcover-editions"),
+      ]),
+    );
+  }
+  if (settings.apiKey) {
+    const author = (book.author || "").split(/\s+/).pop() || "";
+    lookups.push(
+      Promise.race([
+        new GoogleBooksApi(
+          languageCode(book.language || "") || settings.localePreference,
+          false,
+          settings.apiKey,
+        ).getByQuery(`intitle:${book.title} inauthor:${author}`),
+        timeoutReject<Book[]>(8000, "google-editions"),
+      ]).then((books) =>
+        books.map((found) => ({ ...found, sourceProvider: "google" })),
+      ),
+    );
+  }
+  const settled = await Promise.allSettled(lookups);
+  const candidates = settled.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
+  return pickSameEdition(book, candidates);
 }
 
 export async function enrichFromIsbn(
@@ -828,7 +961,12 @@ export function mergeWithConflicts(
   const sourcesById: Record<string, { book: Book; label: string }> = {};
   sourcesById["primary"] = {
     book: primary,
-    label: (primary as BookWithSource)._sourceLabels?.[0] || "Primary Source",
+    // A source's getBook can return a plain Book without the search labels,
+    // so fall back to the source's own name before a generic one.
+    label:
+      (primary as BookWithSource)._sourceLabels?.[0] ||
+      GLOBAL_SEARCH_SOURCE_LABELS[primarySourceId] ||
+      "Primary Source",
   };
   if (primarySourceId) {
     sourcesById[primarySourceId] = sourcesById["primary"];
@@ -842,7 +980,10 @@ export function mergeWithConflicts(
     const id = sec._sourceIds?.[0] || sec._sourceLabels?.[0] || "secondary";
     sourcesById[id] = {
       book: sec,
-      label: sec._sourceLabels?.[0] || "Secondary Source",
+      label:
+        sec._sourceLabels?.[0] ||
+        GLOBAL_SEARCH_SOURCE_LABELS[id] ||
+        "Secondary Source",
     };
   });
 
@@ -895,8 +1036,8 @@ export function mergeWithConflicts(
     { name: "title", label: "Title" },
     { name: "author", label: "Author" },
     { name: "publisher", label: "Publisher" },
-    { name: "publishDate", label: "Publish Date" },
-    { name: "totalPage", label: "Page Count" },
+    { name: "publishDate", label: "Publish date" },
+    { name: "totalPage", label: "Page count" },
     { name: "categories", label: "Categories" },
   ];
 
@@ -925,6 +1066,14 @@ export function mergeWithConflicts(
         });
       }
     });
+
+    // Dates given at different precision ("1994" and "1994/09/28") agree.
+    if (
+      field.name === "publishDate" &&
+      datesAgree(allValues.map((v) => comparableString(v.value)))
+    ) {
+      return;
+    }
 
     if (allValues.length > 1) {
       // Check for conflict
@@ -973,6 +1122,23 @@ export function mergeWithConflicts(
     "translator",
     "narrator",
     "asin",
+    "format",
+    "language",
+    "firstPublishDate",
+    "moods",
+    "pace",
+    // Characters and places come from Goodreads and LibraryThing; the rest of
+    // LibraryThing's Common Knowledge only from LibraryThing.
+    "characters",
+    "places",
+    "events",
+    "firstWords",
+    "lastWords",
+    "quotes",
+    "dedication",
+    "blurbers",
+    "relatedMovies",
+    "originalLanguage",
   ];
 
   for (const field of mergeFields) {
@@ -981,6 +1147,23 @@ export function mergeWithConflicts(
     (result as unknown as Record<string, unknown>)[field as string] =
       preferred.value;
     if (preferred.sourceLabel) contributingSources.add(preferred.sourceLabel);
+  }
+
+  // A person a source credits only as translator or narrator of this edition
+  // is not one of its authors, even when another source's librarians listed
+  // them as one (Goodreads credits Alicia Dellepiane, the Spanish translator
+  // of Harry Potter, as an author; Hardcover and StoryGraph as translator).
+  const notAuthors = creditedOnlyAsTranslatorOrNarrator(
+    Object.values(sourcesById).map((source) => source.book),
+  );
+  const authors = (result.authors || []).filter(
+    (name) => !notAuthors.some((other) => samePerson(name, other)),
+  );
+  if (authors.length && authors.length !== (result.authors || []).length) {
+    result.authors = authors;
+    if (!authors.some((name) => samePerson(name, result.author))) {
+      result.author = authors[0];
+    }
   }
 
   // A series and its number only make sense together, so both come from the
@@ -997,6 +1180,37 @@ export function mergeWithConflicts(
     contributingSources: Array.from(contributingSources),
     conflicts,
   };
+}
+
+/**
+ * The translators and narrators that some source credits as such and not as
+ * an author. Someone a source credits as both (an author who translated
+ * their own book) is not among them.
+ */
+function creditedOnlyAsTranslatorOrNarrator(books: Book[]): string[] {
+  const names: string[] = [];
+  for (const book of books) {
+    const authors = book.authors?.length ? book.authors : [book.author];
+    const others = [book.translator, book.narrator]
+      .flatMap((value) => (value || "").split(/\s*[,;]\s*/))
+      .filter(Boolean);
+    for (const name of others) {
+      if (!authors.some((author) => samePerson(author, name))) names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Whether dates from several sources say the same thing at the precision
+ * each gives: "1994", "1994/09" and "1994-09-28" agree; "1994/01" and
+ * "1994/09/28" do not. Anything that is not such a date never agrees.
+ */
+export function datesAgree(values: string[]): boolean {
+  const dates = values.map((v) => v.trim().replace(/-/g, "/")).filter(Boolean);
+  if (!dates.every((d) => /^\d{4}(\/\d{2}(\/\d{2})?)?$/.test(d))) return false;
+  const longest = dates.reduce((a, b) => (b.length > a.length ? b : a), "");
+  return dates.every((d) => d === longest || longest.startsWith(`${d}/`));
 }
 
 function getQuorumValue<T>(values: T[]): T | undefined {

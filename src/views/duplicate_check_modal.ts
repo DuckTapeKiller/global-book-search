@@ -23,7 +23,7 @@ export class DuplicateCheckModal extends Modal {
     const { contentEl, modalEl } = this;
     modalEl.addClass("book-search-duplicate-modal");
 
-    contentEl.createEl("h2", { text: "Book Note Already Exists" });
+    contentEl.createEl("h2", { text: "Book note already exists" });
 
     contentEl.createEl("p", {
       text: `A note for "${this.bookTitle}" already exists at:`,
@@ -36,9 +36,9 @@ export class DuplicateCheckModal extends Modal {
 
     const buttonContainer = contentEl.createDiv({ cls: "duplicate-actions" });
 
-    // Open Existing button
+    // Open existing button
     const openBtn = buttonContainer.createEl("button", {
-      text: "Open Existing",
+      text: "Open existing",
       cls: "mod-cta",
     });
     openBtn.addEventListener("click", () => {
@@ -46,18 +46,18 @@ export class DuplicateCheckModal extends Modal {
       this.close();
     });
 
-    // Update Metadata button
+    // Update metadata button
     const updateBtn = buttonContainer.createEl("button", {
-      text: "Update Metadata",
+      text: "Update metadata",
     });
     updateBtn.addEventListener("click", () => {
       this.result = DuplicateAction.UPDATE_METADATA;
       this.close();
     });
 
-    // Create Anyway button
+    // Create anyway button
     const createBtn = buttonContainer.createEl("button", {
-      text: "Create Anyway",
+      text: "Create anyway",
     });
     createBtn.addEventListener("click", () => {
       this.result = DuplicateAction.CREATE_ANYWAY;

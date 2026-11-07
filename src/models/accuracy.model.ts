@@ -12,6 +12,7 @@ export interface FieldConflict {
   values: {
     value: unknown;
     source: string;
+    /** The value the merge preferred (not a count of sources). */
     isQuorum: boolean;
   }[];
   currentBestValue: unknown;

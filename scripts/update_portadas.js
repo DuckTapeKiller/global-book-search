@@ -6,7 +6,7 @@
  * 1. Replaces regular dash (-) with em-dash (—) in the path
  * 2. Wraps the path in [[...]] wiki link syntax if not already
  * 
- * Usage: node update_portadas.js /path/to/your/vault
+ * Usage: node scripts/update_portadas.js /path/to/your/vault
  * 
  * Add --dry-run to preview changes without modifying files
  */
@@ -18,7 +18,7 @@ const vaultPath = process.argv[2];
 const dryRun = process.argv.includes('--dry-run');
 
 if (!vaultPath) {
-    console.error('Usage: node update_portadas.js /path/to/vault [--dry-run]');
+    console.error('Usage: node scripts/update_portadas.js /path/to/vault [--dry-run]');
     console.error('');
     console.error('Options:');
     console.error('  --dry-run    Preview changes without modifying files');
@@ -81,7 +81,6 @@ function processFile(filePath) {
 
     // Replace regular dash with em-dash (only between title and author, not in paths)
     // Pattern: word space dash space word (before .jpg)
-    const originalPath = imagePath;
     imagePath = imagePath.replace(/ - (?=[^/]+\.jpg$)/g, ' — ');
 
     // Format as wiki link

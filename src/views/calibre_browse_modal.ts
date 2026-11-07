@@ -37,7 +37,7 @@ export class CalibreBrowseModal extends Modal {
     modalEl.addClass("calibre-browse-modal");
 
     // Header
-    contentEl.createEl("h2", { text: "Browse Calibre Library" });
+    contentEl.createEl("h2", { text: "Browse Calibre library" });
 
     // Tab bar
     const tabBar = contentEl.createDiv({ cls: "calibre-browse-tabs" });
@@ -50,7 +50,7 @@ export class CalibreBrowseModal extends Modal {
 
     // Footer
     const footer = contentEl.createDiv({ cls: "calibre-browse-footer" });
-    this.countEl = footer.createEl("span", {
+    this.countEl = footer.createSpan({
       cls: "calibre-browse-count",
       text: "0 selected",
     });
@@ -59,7 +59,7 @@ export class CalibreBrowseModal extends Modal {
     cancelBtn.addEventListener("click", () => this.close());
 
     this.importBtn = footer.createEl("button", {
-      text: "Import 0 Books",
+      text: "Import 0 books",
       cls: "mod-cta",
     });
     this.importBtn.disabled = true;
@@ -221,11 +221,11 @@ export class CalibreBrowseModal extends Modal {
         cls: "calibre-browse-actions",
       });
 
-      const selectAllBtn = actionBar.createEl("button", { text: "Select All" });
+      const selectAllBtn = actionBar.createEl("button", { text: "Select all" });
       selectAllBtn.addEventListener("click", () => this.selectAll());
 
       const deselectAllBtn = actionBar.createEl("button", {
-        text: "Deselect All",
+        text: "Deselect all",
       });
       deselectAllBtn.addEventListener("click", () => this.deselectAll());
 
@@ -258,7 +258,7 @@ export class CalibreBrowseModal extends Modal {
         }
 
         const textDiv = item.createDiv({ cls: "calibre-browse-book-text" });
-        textDiv.createEl("div", {
+        textDiv.createDiv({
           cls: "calibre-browse-book-title",
           text: book.title,
         });
@@ -302,7 +302,7 @@ export class CalibreBrowseModal extends Modal {
     }
     if (this.importBtn) {
       this.importBtn.textContent =
-        count === 1 ? "Import 1 Book" : `Import ${count} Books`;
+        count === 1 ? "Import 1 book" : `Import ${count} books`;
       this.importBtn.disabled = count === 0;
     }
   }

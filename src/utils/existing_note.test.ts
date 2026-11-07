@@ -4,6 +4,9 @@ import {
   isInFolder,
   normalizeIsbn,
   toIsbn13,
+  isIsbn10,
+  toIsbn10,
+  isbnFromQuery,
 } from "@utils/existing_note";
 
 // A textbook ISBN pair: 0-306-40615-2 is 978-0-306-40615-7.
@@ -85,7 +88,7 @@ describe("findExistingBookNote", () => {
   type FakeFile = { path: string; basename: string };
   const note = (path: string): FakeFile => ({
     path,
-    basename: path.split("/").pop()!.replace(/\.md$/, ""),
+    basename: path.split("/").pop().replace(/\.md$/, ""),
   });
 
   function vault(entries: Array<[string, Record<string, unknown>?]>) {
@@ -162,5 +165,37 @@ describe("findExistingBookNote", () => {
       ["Books/The Colour of Magic and more.md", {}],
     ]);
     expect(findExistingBookNote(app, "Books", book)).toBeNull();
+  });
+});
+
+describe("isIsbn10", () => {
+  it.each([
+    ["0143034901", true],
+    ["0156001314", true],
+    ["280801905X", true],
+    ["0143034902", false],
+    ["B00ABCDE12", false],
+    ["014303490", false],
+  ])("%s → %s", (value, expected) => {
+    expect(isIsbn10(value)).toBe(expected);
+  });
+});
+
+describe("toIsbn10", () => {
+  it("gives the ISBN-10 of a 978 ISBN, none of a 979 one", () => {
+    expect(toIsbn10("9780156001311")).toBe("0156001314");
+    expect(toIsbn10("9781781100486")).toBe("1781100489");
+    expect(toIsbn10("9791032305690")).toBe("");
+  });
+});
+
+describe("isbnFromQuery", () => {
+  it.each([
+    ["isbn:978-0-15-600131-1", "9780156001311"],
+    ["0156001314", "0156001314"],
+    ["The Name of the Rose", ""],
+    ["1984", ""],
+  ])("%j → %j", (query, isbn) => {
+    expect(isbnFromQuery(query)).toBe(isbn);
   });
 });

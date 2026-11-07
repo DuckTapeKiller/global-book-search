@@ -21,7 +21,7 @@ export class BarcodeScannerModal extends Modal {
     const header = contentEl.createDiv({ cls: "book-search-barcode-header" });
     const iconEl = header.createDiv({ cls: "book-search-barcode-icon" });
     setIcon(iconEl, "scan");
-    header.createEl("h2", { text: "Scan ISBN Barcode" });
+    header.createEl("h2", { text: "Scan ISBN barcode" });
 
     const scannerWrapper = contentEl.createDiv({
       cls: "barcode-scanner-wrapper",
@@ -41,7 +41,7 @@ export class BarcodeScannerModal extends Modal {
     });
 
     new ButtonComponent(controls)
-      .setButtonText("Switch Camera")
+      .setButtonText("Switch camera")
       .setClass("mod-secondary")
       .onClick(() => this.switchCamera());
 

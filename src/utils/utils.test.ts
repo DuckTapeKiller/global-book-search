@@ -21,6 +21,15 @@ describe("util.js", () => {
     ).toContain("tags:\n- author/kafka\n- libros/x");
   });
 
+  it("toStringFrontMatter quotes an ASIN so its leading zero survives", () => {
+    expect(utils.toStringFrontMatter({ Asin: "0140445285" })).toBe(
+      'Asin: "0140445285"',
+    );
+    expect(utils.toStringFrontMatter({ ASIN: "B074W9WW4S" })).toBe(
+      'ASIN: "B074W9WW4S"',
+    );
+  });
+
   it("toStringFrontMatter quotes a bare wikilink so it is not read as a nested list", () => {
     expect(utils.toStringFrontMatter({ Series: "[[Discworld]]" })).toBe(
       'Series: "[[Discworld]]"',

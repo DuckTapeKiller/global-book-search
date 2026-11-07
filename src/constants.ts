@@ -11,7 +11,7 @@ export enum ServiceProvider {
 export const GLOBAL_SEARCH_SOURCE_LABELS: Record<string, string> = {
   goodreads: "Goodreads",
   google: "Google Books",
-  openlibrary: "OpenLibrary",
+  openlibrary: "Open Library",
   storygraph: "StoryGraph",
   calibre: "Calibre",
   hardcover: "Hardcover",

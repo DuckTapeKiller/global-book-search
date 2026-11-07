@@ -4,19 +4,15 @@ import {
   Menu,
   Notice,
   PluginSettingTab,
+  requireApiVersion,
   SecretComponent,
   Setting,
   setIcon,
+  type IconName,
+  type SettingDefinitionItem,
+  type SettingDefinitionRender,
+  type SettingGroup,
 } from "obsidian";
-
-// SecretComponent / app.secretStorage only exist on newer Obsidian; gate on both.
-function secretStorageAvailable(app: App): boolean {
-  return (
-    typeof SecretComponent !== "undefined" &&
-    typeof app.secretStorage?.getSecret === "function"
-  );
-}
-
 import { GLOBAL_SEARCH_SOURCE_LABELS, ServiceProvider } from "@src/constants";
 import languages from "@utils/languages";
 import BookSearchPlugin from "../main";
@@ -56,7 +52,7 @@ export interface BookSearchPluginSettings {
   localePreference: string;
   apiKey: string;
   hardcoverApiToken: string; // Hardcover personal API token (Account → API)
-  librarythingApiKey: string; // LibraryThing developer key (services API)
+  librarythingApiKey: string; // LibraryThing API token (Talpa Search API)
   // StoryGraph login: the user's own browser cookies (secret names when
   // SecretStorage holds them). StoryGraph answers only signed-in requests.
   storygraphSessionCookie: string; // _storygraph_session
@@ -366,7 +362,10 @@ export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
   // Merge behavior
   fieldSourcePreferences: {
     title: ["primary", "goodreads", "storygraph", "google", "openlibrary"],
-    author: ["primary", "goodreads", "storygraph", "google", "openlibrary"],
+    // Goodreads separates authors from translators and other contributors;
+    // some sources list a translator as a second author.
+    author: ["goodreads", "primary", "storygraph", "google", "openlibrary"],
+    authors: ["goodreads", "primary", "storygraph", "google", "openlibrary"],
     publisher: ["goodreads", "openlibrary", "google", "storygraph", "primary"],
     publishDate: [
       "goodreads",
@@ -388,8 +387,15 @@ export const DEFAULT_SETTINGS: BookSearchPluginSettings = {
     isbn13: ["primary", "goodreads", "google", "openlibrary", "storygraph"],
     isbn10: ["primary", "goodreads", "google", "openlibrary", "storygraph"],
     originalTitle: ["goodreads", "primary", "storygraph"],
-    translator: ["storygraph", "goodreads", "primary"],
+    // Goodreads credits translators edition by edition; StoryGraph sometimes
+    // lists a later edition's translator as well.
+    translator: ["goodreads", "storygraph", "primary"],
     asin: ["goodreads", "primary"],
+    firstPublishDate: ["goodreads", "storygraph", "openlibrary", "primary"],
+    characters: ["goodreads", "librarything", "primary"],
+    places: ["goodreads", "librarything", "primary"],
+    moods: ["storygraph", "primary"],
+    pace: ["storygraph", "primary"],
   },
 
   // Cover behavior
@@ -440,47 +446,6 @@ type SettingsTabId = "notes" | "sources" | "search" | "diagnostics" | "support";
 
 const KOFI_URL = "https://ko-fi.com/ducktapekiller";
 
-const SETTINGS_TABS: ReadonlyArray<{
-  id: SettingsTabId;
-  label: string;
-  icon: string;
-  intro: string;
-}> = [
-  {
-    id: "notes",
-    label: "Notes",
-    icon: "file-text",
-    intro: "Where new book notes go and what they contain.",
-  },
-  {
-    id: "sources",
-    label: "Sources",
-    icon: "library",
-    intro:
-      "Where book data comes from. Goodreads and Open Library need no setup; the others need a key or a login, and each one explains how to get it.",
-  },
-  {
-    id: "search",
-    label: "Search & merging",
-    icon: "search",
-    intro:
-      "What happens before a note is created, and which source wins when sources disagree.",
-  },
-  {
-    id: "diagnostics",
-    label: "Diagnostics",
-    icon: "activity",
-    intro:
-      "Network behaviour, and how each source has performed over the last three days.",
-  },
-  {
-    id: "support",
-    label: "Support",
-    icon: "heart",
-    intro: "Ways to support Global Book Search, and where to get help.",
-  },
-];
-
 /**
  * A run of text for descriptions and guides: plain, code, bold, a link, or a
  * bulleted sub-list.
@@ -504,14 +469,110 @@ function appendRich(el: HTMLElement, parts: readonly Rich[]): void {
   }
 }
 
+/** The same text without its formatting, for settings search. */
+function plainText(parts: readonly Rich[]): string {
+  return parts
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if ("code" in part) return part.code;
+      if ("strong" in part) return part.strong;
+      if ("list" in part) return part.list.map(plainText).join(" ");
+      return part.link;
+    })
+    .join("");
+}
+
+/** A section or source title with its Lucide icon in a small tinted badge. */
+function sectionTitle(text: string, icon: IconName): DocumentFragment {
+  return createFragment((fragment) => {
+    const title = fragment.createSpan({ cls: "bsp-section-title" });
+    setIcon(title.createSpan({ cls: "bsp-section-icon" }), icon);
+    title.createSpan({ text });
+  });
+}
+
 /** The label beside a source's name: ready, saved, optional or still needed. */
 type SourceStatus = {
   kind: "ready" | "set" | "optional" | "needed";
   text: string;
 };
 
+/**
+ * One settings row: the name, description and aliases Obsidian shows and
+ * searches, and how to build the row's controls. The same rows make up
+ * Obsidian's own searchable settings pages (Obsidian 1.13 and later) and the
+ * tabbed page drawn on older versions.
+ */
+interface Row {
+  name: string;
+  desc?: string;
+  aliases?: string[];
+  searchable?: boolean;
+  visible?: () => boolean;
+  render: (setting: Setting) => void;
+}
+
+/** Rows under one heading, which has an icon. */
+interface Group {
+  heading?: string;
+  icon?: IconName;
+  rows: Row[];
+}
+
+/** A page of settings: a sub-page from Obsidian 1.13, a tab before it. */
+interface Page {
+  id: SettingsTabId;
+  name: string;
+  icon: string;
+  intro: string;
+  groups: Group[];
+}
+
+type KeysOfType<V> = {
+  [K in keyof BookSearchPluginSettings]-?: BookSearchPluginSettings[K] extends V
+    ? K
+    : never;
+}[keyof BookSearchPluginSettings];
+
+type SecretKey =
+  | "hardcoverApiToken"
+  | "librarythingApiKey"
+  | "storygraphSessionCookie"
+  | "storygraphRememberToken";
+
+const PERFORMANCE_SERVICES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "goodreads", label: "Goodreads" },
+  { id: "google", label: "Google Books" },
+  { id: "openlibrary", label: "Open Library" },
+  { id: "storygraph", label: "StoryGraph" },
+  { id: "hardcover", label: "Hardcover" },
+  { id: "librarything", label: "LibraryThing" },
+  { id: "calibre", label: "Calibre" },
+];
+
+const MERGE_FIELDS: ReadonlyArray<{ field: string; label: string }> = [
+  { field: "description", label: "Description" },
+  { field: "categories", label: "Categories" },
+  { field: "publisher", label: "Publisher" },
+  { field: "publishDate", label: "Publish date" },
+  { field: "totalPage", label: "Page count" },
+  { field: "coverUrl", label: "Cover URL" },
+  { field: "translator", label: "Translator" },
+  { field: "originalTitle", label: "Original title" },
+];
+
+const MERGE_SOURCES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "primary", label: "Primary (selected source)" },
+  { id: "goodreads", label: "Goodreads" },
+  { id: "storygraph", label: "StoryGraph" },
+  { id: "google", label: "Google Books" },
+  { id: "openlibrary", label: "Open Library" },
+  { id: "fable", label: "Fable (passive)" },
+  { id: "loc", label: "Library of Congress (passive)" },
+];
+
 export class BookSearchSettingTab extends PluginSettingTab {
-  /** The tab shown; kept while the settings window stays open. */
+  /** The tab the tabbed page shows (Obsidian before 1.13). */
   private activeTab: SettingsTabId = "notes";
 
   constructor(
@@ -521,558 +582,1068 @@ export class BookSearchSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  private createHeader(title: string, containerEl: HTMLElement) {
-    const setting = new Setting(containerEl).setHeading().setName(title);
-    setting.settingEl.addClass("book-search-plugin__header");
-    return setting;
+  // ── Obsidian 1.13 and later: Obsidian's own settings pages ──────────────
+
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    const pages = this.pages();
+    const entries: SettingDefinitionItem[] = pages.map((page) => ({
+      type: "page",
+      name: page.name,
+      desc: page.intro,
+      items: page.groups.map((group) => ({
+        type: "group",
+        heading: group.heading,
+        items: group.rows.map((row, index) => ({
+          ...this.definition(row),
+          render: (setting: Setting, settingGroup: SettingGroup) => {
+            // Obsidian's group headings are plain text, and it resets them
+            // before rendering the rows again, so the first row gives its
+            // section the icon each time.
+            const { heading, icon } = group;
+            if (index === 0 && heading && icon) {
+              settingGroup.setHeading(sectionTitle(heading, icon));
+            }
+            setting.settingEl.addClass("bsp-setting");
+            row.render(setting);
+          },
+        })),
+      })),
+    }));
+    return [
+      ...entries,
+      {
+        // Obsidian's page entries cannot carry an icon. This hidden row is
+        // drawn after them in the same list, every time the list is drawn,
+        // and gives each entry its icon.
+        name: "",
+        searchable: false,
+        visible: false,
+        render: (_setting: Setting, settingGroup: SettingGroup) => {
+          for (const row of Array.from(settingGroup.listEl.children)) {
+            const name = row
+              .querySelector(".setting-item-name")
+              ?.textContent?.trim();
+            const page = pages.find((candidate) => candidate.name === name);
+            if (!page || row.querySelector(":scope > .bsp-page-icon")) {
+              continue;
+            }
+            const badge = createSpan({ cls: "bsp-page-icon" });
+            setIcon(badge, page.icon);
+            row.prepend(badge);
+          }
+        },
+      },
+    ];
   }
 
-  private createFileLocationSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("New file location")
-      .setDesc("New book notes will be placed here.")
-      .addSearch((cb) => {
-        try {
-          new FolderSuggest(this.app, cb.inputEl);
-        } catch (e) {
-          console.error(e); // Improved error handling
-        }
-        cb.setPlaceholder("Example: folder1/folder2")
-          .setValue(this.plugin.settings.folder)
-          .onChange((new_folder) => {
-            this.plugin.settings.folder = new_folder;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-  }
-
-  private createFileNameFormatSetting(containerEl: HTMLElement) {
-    const setting = new Setting(containerEl)
-      .setClass("book-search-plugin__settings--new_file_name")
-      .setName("New file name");
-    // Built into descEl (not a detached fragment) so it renders on all Obsidian
-    // versions; setDesc(DocumentFragment) shows "[object DocumentFragment]".
-    setting.descEl.createSpan({
-      text: "Enter the file name format. Example: ",
-    });
-    const newFileNameHint = setting.descEl.createEl("code", {
-      text:
-        replaceDateInString(this.plugin.settings.fileNameFormat) ||
-        "{{title}} - {{author}}",
-    });
-
-    setting.addSearch((cb) => {
-      try {
-        new FileNameFormatSuggest(this.app, cb.inputEl);
-      } catch (e) {
-        console.error(e);
-      }
-      cb.setPlaceholder("Example: {{title}} - {{author}}")
-        .setValue(this.plugin.settings.fileNameFormat)
-        .onChange((newValue) => {
-          this.plugin.settings.fileNameFormat = newValue?.trim();
-          void this.plugin.saveSettings().catch((err) => console.warn(err));
-
-          newFileNameHint.textContent =
-            replaceDateInString(newValue) || "{{title}} - {{author}}";
-        });
-    });
-  }
-
-  private createFrontmatterSetting(containerEl: HTMLElement) {
-    const setting = new Setting(containerEl)
-      .setName("Frontmatter")
-      .setDesc("The frontmatter that is inserted into the text.");
-
-    // Build the action buttons directly into the description element. Passing a
-    // detached DocumentFragment to setDesc() renders as "[object DocumentFragment]"
-    // on newer Obsidian, which previously hid these buttons (incl. Languages).
-    const buttonContainer = setting.descEl.createDiv();
-    buttonContainer.addClass("book-search-plugin__settings-button-group");
-
-    const restoreButton = buttonContainer.createEl("button", {
-      text: "Restore default",
-      cls: "mod-warning",
-    });
-    restoreButton.onclick = () => {
-      this.plugin.settings.frontmatter = DEFAULT_SETTINGS.frontmatter;
-      void this.plugin.saveSettings().then(() => this.display());
+  private definition(row: Row): SettingDefinitionRender {
+    return {
+      name: row.name,
+      desc: row.desc,
+      aliases: row.aliases,
+      searchable: row.searchable,
+      visible: row.visible,
+      render: (setting) => {
+        setting.settingEl.addClass("bsp-setting");
+        row.render(setting);
+      },
     };
+  }
 
-    // "Language" button that opens a native, theme-adaptive Obsidian menu.
-    // setUseNativeMenu(false) forces the in-app themed menu instead of the OS menu.
-    const languageButton = buttonContainer.createEl("button", {
-      text: "Language",
+  /**
+   * Obsidian's default writes the whole settings object to data.json, which
+   * is how a copy holding only defaults used to replace a user's settings
+   * (#9). Any value Obsidian sets goes through the plugin's settings store
+   * instead, which writes only what changed.
+   */
+  setControlValue(key: string, value: unknown): Promise<void> {
+    (this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+    return this.plugin.saveSettings();
+  }
+
+  /** Redraw the settings after a change to what they show. */
+  refresh(): void {
+    if (requireApiVersion("1.13.0")) {
+      this.update();
+    } else if (this.containerEl.isShown()) {
+      this.display();
+    }
+  }
+
+  // ── Before Obsidian 1.13: the same pages as tabs ────────────────────────
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.addClass("book-search-plugin__settings");
+
+    const pages = this.pages();
+    const tabBar = containerEl.createDiv({
+      cls: "bsp-tabs",
+      attr: { role: "tablist" },
     });
-    languageButton.addEventListener("click", (event) => {
-      const menu = new Menu();
-      menu.setUseNativeMenu(false);
-      const current = this.plugin.settings.frontmatter;
-      Object.keys(FRONTMATTER_TEMPLATES).forEach((lang) => {
-        const template =
-          FRONTMATTER_TEMPLATES[lang as keyof typeof FRONTMATTER_TEMPLATES];
-        menu.addItem((item) => {
-          item
-            .setTitle(lang)
-            .setChecked(template === current)
-            .onClick(() => {
-              this.plugin.settings.frontmatter = template;
-              void this.plugin.saveSettings().then(() => this.display());
-            });
-        });
+    for (const page of pages) {
+      const active = page.id === this.activeTab;
+      const button = tabBar.createEl("button", {
+        cls: active ? "bsp-tab is-active" : "bsp-tab",
+        attr: { type: "button", role: "tab", "aria-selected": String(active) },
       });
-      menu.showAtMouseEvent(event);
+      setIcon(button.createSpan({ cls: "bsp-tab-icon" }), page.icon);
+      button.createSpan({ text: page.name });
+      button.addEventListener("click", () => {
+        if (this.activeTab === page.id) return;
+        this.activeTab = page.id;
+        this.display();
+      });
+    }
+
+    const current =
+      pages.find((page) => page.id === this.activeTab) ?? pages[0];
+    const body = containerEl.createDiv({
+      cls: "bsp-tab-body",
+      attr: { role: "tabpanel" },
     });
+    body.createEl("p", { cls: "bsp-tab-intro", text: current.intro });
 
-    setting.addTextArea((text) => {
-      text.inputEl.rows = 15;
-      text.inputEl.cols = 40;
-      text.inputEl.addClass("book-search-plugin__settings--textarea");
-      text
-        .setPlaceholder("Enter the frontmatter")
-        .setValue(this.plugin.settings.frontmatter)
-        .onChange((newValue) => {
-          this.plugin.settings.frontmatter = newValue;
-          void this.plugin.saveSettings().catch((err) => console.warn(err));
-        });
-    });
+    for (const group of current.groups) {
+      const rows = group.rows.filter((row) => row.visible?.() ?? true);
+      if (rows.length === 0) continue;
+      if (group.heading) this.createHeader(group.heading, body, group.icon);
+      for (const row of rows) {
+        const setting = new Setting(body).setName(row.name);
+        if (row.desc) setting.setDesc(row.desc);
+        setting.settingEl.addClass("bsp-setting");
+        row.render(setting);
+      }
+    }
   }
 
-  private createContentSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Content")
-      .setDesc(
-        "This content is automatically added to every new book note after the frontmatter. Use it to include default headings (e.g., # Thoughts), reading logs, or inline scripts for further customization.",
-      )
-      .addTextArea((text) => {
-        text.inputEl.rows = 10;
-        text.inputEl.cols = 40;
-        text.inputEl.addClass("book-search-plugin__settings--textarea");
-        text
-          .setPlaceholder("Enter the content")
-          .setValue(this.plugin.settings.content)
-          .onChange((newValue) => {
-            this.plugin.settings.content = newValue;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-  }
-
-  private createTagSettings(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Author tag prefix")
-      .setDesc("Add a prefix to the author tag (e.g., 'escritores/').")
-      .addText((text) =>
-        text
-          .setPlaceholder("Example: escritores/")
-          .setValue(this.plugin.settings.authorTagPrefix)
-          .onChange((value) => {
-            this.plugin.settings.authorTagPrefix = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Title tag prefix")
-      .setDesc("Add a prefix to the book title tag (e.g., 'libros/').")
-      .addText((text) =>
-        text
-          .setPlaceholder("Example: libros/")
-          .setValue(this.plugin.settings.titleTagPrefix)
-          .onChange((value) => {
-            this.plugin.settings.titleTagPrefix = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-  }
-
-  private createCoverImagePathSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Cover image path")
-      .setDesc("Path where cover images are saved (Cover mode: Local).")
-      .addSearch((cb) => {
-        try {
-          new FolderSuggest(this.app, cb.inputEl);
-        } catch {
-          // eslint-disable
-        }
-        cb.setPlaceholder("Enter the path (e.g., Images/Covers)")
-          .setValue(this.plugin.settings.coverImagePath)
-          .onChange((value) => {
-            this.plugin.settings.coverImagePath = value.trim();
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-  }
-
-  /** Heading for one source, with its status label and a short description. */
-  private createSourceHeading(
+  private createHeader(
+    title: string,
     containerEl: HTMLElement,
+    icon?: IconName,
+  ): void {
+    const setting = new Setting(containerEl)
+      .setHeading()
+      .setName(icon ? sectionTitle(title, icon) : title);
+    setting.settingEl.addClass("book-search-plugin__header");
+  }
+
+  // ── Pages ───────────────────────────────────────────────────────────────
+
+  private pages(): Page[] {
+    return [
+      {
+        id: "notes",
+        name: "Notes",
+        icon: "file-text",
+        intro: "Where new book notes go and what they contain.",
+        groups: this.notesGroups(),
+      },
+      {
+        id: "sources",
+        name: "Sources",
+        icon: "library",
+        intro:
+          "Where book data comes from. Goodreads and Open Library need no setup; the others need a key or a login, and each one explains how to get it.",
+        groups: this.sourcesGroups(),
+      },
+      {
+        id: "search",
+        name: "Search & merging",
+        icon: "search",
+        intro:
+          "What happens before a note is created, and which source wins when sources disagree.",
+        groups: this.searchGroups(),
+      },
+      {
+        id: "diagnostics",
+        name: "Diagnostics",
+        icon: "activity",
+        intro:
+          "Network behaviour, and how each source has performed over the last three days.",
+        groups: this.diagnosticsGroups(),
+      },
+      {
+        id: "support",
+        name: "Support",
+        icon: "heart",
+        intro: "Ways to support Global Book Search, and where to get help.",
+        groups: this.supportGroups(),
+      },
+    ];
+  }
+
+  private notesGroups(): Group[] {
+    return [
+      {
+        heading: "Where notes go",
+        icon: "folder-open",
+        rows: [
+          this.folderRow(),
+          this.fileNameRow(),
+          this.toggleRow(
+            "Open new book notes",
+            "Open each new book note as soon as it is created.",
+            "openPageOnCompletion",
+          ),
+        ],
+      },
+      {
+        heading: "What a note contains",
+        icon: "file-text",
+        rows: [
+          this.frontmatterRow(),
+          this.templateFileRow(),
+          this.contentRow(),
+          this.toggleRow(
+            "Enable series linking",
+            "Fill {{seriesLink}} with a [[wikilink]] to the book's series. {{series}} and {{seriesNumber}} are always available. Add the ones you want to your template.",
+            "enableSeriesLinking",
+            ["Series"],
+          ),
+        ],
+      },
+      {
+        heading: "Tags",
+        icon: "tags",
+        rows: [
+          this.textRow(
+            "Author tag prefix",
+            "Add a prefix to the author tag (e.g., 'escritores/').",
+            "Example: escritores/",
+            "authorTagPrefix",
+          ),
+          this.textRow(
+            "Title tag prefix",
+            "Add a prefix to the book title tag (e.g., 'libros/').",
+            "Example: libros/",
+            "titleTagPrefix",
+          ),
+        ],
+      },
+      {
+        heading: "Covers",
+        icon: "image",
+        rows: [
+          this.coverModeRow(),
+          this.coverExtensionRow(),
+          this.coverPathRow(),
+        ],
+      },
+    ];
+  }
+
+  private sourcesGroups(): Group[] {
+    return [
+      {
+        heading: "What each source provides",
+        icon: "table",
+        rows: [this.sourceMapRow()],
+      },
+      {
+        heading: "Searching",
+        icon: "search",
+        rows: [
+          this.defaultSourceRow(),
+          this.preferredLanguageRow(),
+          this.toggleRow(
+            "Show cover images in search",
+            "Show book covers in the list of search results.",
+            "showCoverImageInSearch",
+          ),
+          this.toggleRow(
+            "A button for each source",
+            "Add Goodreads, Open Library, StoryGraph, Google Books, LibraryThing and Hardcover buttons to the window the ribbon button opens. Global search, Calibre and Bulk import are always there.",
+            "showIndividualServiceButtons",
+          ),
+        ],
+      },
+      {
+        heading: "Sources",
+        icon: "library",
+        rows: [
+          this.sourceRow(
+            "Goodreads",
+            "book-open",
+            { kind: "ready", text: "No setup" },
+            [
+              "Works as it is. When Goodreads blocks a book page, the plugin tries other routes and archived copies, so a note can occasionally miss a field such as the publisher.",
+            ],
+          ),
+        ],
+      },
+      {
+        rows: [
+          this.sourceRow(
+            "Open Library",
+            "landmark",
+            { kind: "ready", text: "No setup" },
+            ["Works as it is."],
+          ),
+        ],
+      },
+      { rows: this.googleRows() },
+      { rows: this.storyGraphRows() },
+      { rows: this.hardcoverRows() },
+      { rows: this.libraryThingRows() },
+      { rows: this.calibreRows() },
+    ];
+  }
+
+  private searchGroups(): Group[] {
+    return [
+      {
+        heading: "Before a note is created",
+        icon: "copy-check",
+        rows: [
+          this.toggleRow(
+            "Warn on duplicate",
+            "Show a warning before creating a note if one already exists for this book.",
+            "warnOnDuplicate",
+          ),
+        ],
+      },
+      {
+        heading: "Search history",
+        icon: "history",
+        rows: [
+          this.sliderRow(
+            "Search history size",
+            "Number of recent searches to remember (0 to disable).",
+            "maxSearchHistory",
+            [0, 20, 1],
+          ),
+          this.clearSearchHistoryRow(),
+        ],
+      },
+      {
+        heading: "When sources disagree",
+        icon: "scale",
+        rows: [
+          this.noteRow(
+            "When several sources have a value for a field, the one chosen here wins. Fable and the Library of Congress are consulted only for fields where you choose them.",
+          ),
+          ...MERGE_FIELDS.map(({ field, label }) =>
+            this.fieldSourceRow(field, label),
+          ),
+        ],
+      },
+    ];
+  }
+
+  private diagnosticsGroups(): Group[] {
+    return [
+      {
+        heading: "Network",
+        icon: "network",
+        rows: [
+          this.toggleRow(
+            "Diagnostics mode",
+            "Enable verbose logging (Developer Tools console) and richer provider failure details. Useful when a scraper or API changes and results suddenly disappear.",
+            "diagnosticsEnabled",
+          ),
+          this.httpCacheRow(),
+          this.sliderRow(
+            "HTTP cache TTL (minutes)",
+            "How long cached responses are kept before expiring.",
+            "httpCacheTtlMinutes",
+            [0, 60, 1],
+          ),
+          this.sliderRow(
+            "Rate limit (ms per host)",
+            "Minimum delay between requests to the same domain. Higher values reduce blocking.",
+            "httpRateLimitMs",
+            [0, 2000, 50],
+          ),
+          this.sliderRow(
+            "Retry count",
+            "How many times to retry transient failures (429/5xx/timeouts).",
+            "httpMaxRetries",
+            [0, 5, 1],
+          ),
+          this.sliderRow(
+            "Retry base delay (ms)",
+            "Initial retry delay; each subsequent retry doubles.",
+            "httpRetryBaseDelayMs",
+            [100, 5000, 50],
+          ),
+        ],
+      },
+      {
+        heading: "Service performance",
+        icon: "activity",
+        rows: [
+          this.noteRow(
+            "Reliability of each source over the last three days. Hover a dot for that day's details; use Copy report when filing an issue.",
+            true,
+          ),
+          this.servicePerformanceRow(),
+          this.serviceReportRow(),
+        ],
+      },
+    ];
+  }
+
+  private supportGroups(): Group[] {
+    return [
+      { rows: [this.supportCardRow()] },
+      {
+        heading: "Help and feedback",
+        icon: "life-buoy",
+        rows: [
+          {
+            name: "Report a problem or suggest a feature",
+            desc: "Open an issue on GitHub. For a problem with a source, include the report from Diagnostics → Copy report.",
+            render: (setting) => {
+              setting.addButton((button) =>
+                button
+                  .setButtonText("Open issues")
+                  .onClick(() => window.open(`${docUrl}/issues`)),
+              );
+            },
+          },
+          {
+            name: "Star the project",
+            desc: "A star on GitHub helps other readers find the plugin.",
+            render: (setting) => {
+              setting.addButton((button) =>
+                button
+                  .setButtonText("Open on GitHub")
+                  .onClick(() => window.open(docUrl)),
+              );
+            },
+          },
+          {
+            name: "Version",
+            desc: `Global Book Search ${this.plugin.manifest.version}`,
+            render: () => {},
+          },
+        ],
+      },
+    ];
+  }
+
+  // ── Generic rows ────────────────────────────────────────────────────────
+
+  private save(): void {
+    void this.plugin.saveSettings();
+  }
+
+  private saveAndRefresh(): void {
+    void this.plugin.saveSettings().then(() => this.refresh());
+  }
+
+  private toggleRow(
     name: string,
+    desc: string,
+    key: KeysOfType<boolean>,
+    aliases?: string[],
+  ): Row {
+    return {
+      name,
+      desc,
+      aliases,
+      render: (setting) => {
+        setting.addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings[key]).onChange((value) => {
+            this.plugin.settings[key] = value;
+            this.save();
+          }),
+        );
+      },
+    };
+  }
+
+  private textRow(
+    name: string,
+    desc: string,
+    placeholder: string,
+    key: "authorTagPrefix" | "titleTagPrefix",
+  ): Row {
+    return {
+      name,
+      desc,
+      render: (setting) => {
+        setting.addText((text) =>
+          text
+            .setPlaceholder(placeholder)
+            .setValue(this.plugin.settings[key])
+            .onChange((value) => {
+              this.plugin.settings[key] = value;
+              this.save();
+            }),
+        );
+      },
+    };
+  }
+
+  /**
+   * A slider. Obsidian 1.13 and later show its value beside it; on older
+   * versions the row shows the value itself.
+   */
+  private sliderRow(
+    name: string,
+    desc: string,
+    key: KeysOfType<number>,
+    [min, max, step]: [number, number, number],
+  ): Row {
+    return {
+      name,
+      desc,
+      render: (setting) => {
+        const valueEl = requireApiVersion("1.13.0")
+          ? null
+          : setting.controlEl.createSpan({ cls: "bsp-slider-value" });
+        valueEl?.setText(String(this.plugin.settings[key]));
+        setting.addSlider((slider) =>
+          slider
+            .setLimits(min, max, step)
+            .setValue(this.plugin.settings[key])
+            .onChange((value) => {
+              this.plugin.settings[key] = value;
+              valueEl?.setText(String(value));
+              this.save();
+            }),
+        );
+      },
+    };
+  }
+
+  /** A row of explanatory text, with no controls. */
+  /** Where to find which values each source provides. */
+  private sourceMapRow(): Row {
+    const text: Rich[] = [
+      "Every note starts from the same default set of values: title, authors, translator, publisher, dates, pages, ISBNs, description and cover. The sources provide different values, and some provide more: StoryGraph's moods and pace, Hardcover's characters, LibraryThing's first words and dedication. ",
+      {
+        link: "The README lists them by source",
+        href: "https://github.com/DuckTapeKiller/global-book-search#what-each-source-provides",
+      },
+      ", with the order in which the plugin chooses between them.",
+    ];
+    return {
+      name: "What each source provides",
+      desc: plainText(text),
+      render: (setting) => {
+        const { settingEl } = setting;
+        settingEl.empty();
+        settingEl.addClass("bsp-block-row");
+        appendRich(settingEl.createEl("p"), text);
+      },
+    };
+  }
+
+  private noteRow(text: string, searchable = false): Row {
+    return {
+      name: "",
+      desc: text,
+      searchable,
+      render: (setting) => setting.settingEl.addClass("bsp-note-row"),
+    };
+  }
+
+  /**
+   * A secret: Obsidian's secret storage where it exists (1.11.4 and later),
+   * else a password field. `test` adds a button that reports on it.
+   */
+  private secretRow(
+    name: string,
+    key: SecretKey,
+    options: {
+      desc?: string;
+      aliases?: string[];
+      placeholder?: string;
+      test?: () => Promise<string>;
+    },
+  ): Row {
+    return {
+      name,
+      desc:
+        options.desc ??
+        (requireApiVersion("1.11.4")
+          ? "Kept in Obsidian's secret storage."
+          : "Kept in this plugin's settings."),
+      aliases: options.aliases,
+      render: (setting) => {
+        if (requireApiVersion("1.11.4")) {
+          setting.addComponent((el) =>
+            new SecretComponent(this.app, el)
+              .setValue(this.plugin.settings[key])
+              .onChange((value) => {
+                this.plugin.settings[key] = value ?? "";
+                this.save();
+              }),
+          );
+        } else {
+          setting.addText((text) => {
+            text.inputEl.type = "password";
+            text
+              .setPlaceholder(options.placeholder ?? "")
+              .setValue(this.plugin.settings[key])
+              .onChange((value) => {
+                this.plugin.settings[key] = value.trim();
+                this.save();
+              });
+          });
+        }
+        const test = options.test;
+        if (test) {
+          setting.addButton((button) =>
+            button.setButtonText("Test").onClick(() => {
+              button.setDisabled(true);
+              void test()
+                .then((report) => new Notice(`${name}:\n${report}`, 60_000))
+                .finally(() => {
+                  // A block, not an expression: setDisabled() returns the
+                  // button, and Obsidian's components have a chaining then(),
+                  // so returning it here would make the promise resolve with
+                  // itself, forever, and freeze Obsidian.
+                  button.setDisabled(false);
+                });
+            }),
+          );
+        }
+      },
+    };
+  }
+
+  /** The first row of a source: its name, a status label and what it is. */
+  private sourceRow(
+    name: string,
+    icon: IconName,
     status: SourceStatus,
     description: readonly Rich[],
-  ): void {
-    const setting = new Setting(containerEl).setHeading().setName(name);
-    setting.settingEl.addClass("bsp-source-heading");
-    setting.nameEl.createSpan({
-      cls: `bsp-status bsp-status--${status.kind}`,
-      text: status.text,
-    });
-    appendRich(setting.descEl, description);
+  ): Row {
+    return {
+      name,
+      desc: plainText(description),
+      aliases: [status.text],
+      render: (setting) => {
+        // A heading on the tabbed page; inside Obsidian's own setting groups
+        // (1.13 and later) a heading row loses the row padding, so the name
+        // is styled by the class instead.
+        if (!requireApiVersion("1.13.0")) setting.setHeading();
+        setting.settingEl.addClass("bsp-source-heading");
+        setting.nameEl.empty();
+        setting.nameEl.appendChild(sectionTitle(name, icon));
+        setting.nameEl.createSpan({
+          cls: `bsp-status bsp-status--${status.kind}`,
+          text: status.text,
+        });
+        setting.descEl.empty();
+        appendRich(setting.descEl, description);
+      },
+    };
   }
 
   /** A collapsible step-by-step guide, closed until the reader opens it. */
-  private createGuide(
-    containerEl: HTMLElement,
+  private guideRow(
     summary: string,
     steps: readonly (readonly Rich[])[],
     notes: readonly (readonly Rich[])[] = [],
-  ): void {
-    const details = containerEl.createEl("details", { cls: "bsp-guide" });
-    details.createEl("summary", { text: summary });
-    const list = details.createEl("ol");
-    for (const step of steps) appendRich(list.createEl("li"), step);
-    for (const note of notes) appendRich(details.createEl("p"), note);
+  ): Row {
+    return {
+      name: summary,
+      render: (setting) => {
+        const { settingEl } = setting;
+        settingEl.empty();
+        settingEl.addClass("bsp-block-row");
+        const details = settingEl.createEl("details", { cls: "bsp-guide" });
+        details.createEl("summary", { text: summary });
+        const list = details.createEl("ol");
+        for (const step of steps) appendRich(list.createEl("li"), step);
+        for (const note of notes) appendRich(details.createEl("p"), note);
+      },
+    };
   }
 
-  private createDefaultSourceSetting(containerEl: HTMLElement) {
+  // ── Notes ───────────────────────────────────────────────────────────────
+
+  private folderRow(): Row {
+    return {
+      name: "New file location",
+      desc: "New book notes will be placed here.",
+      render: (setting) => {
+        setting.addSearch((search) => {
+          new FolderSuggest(this.app, search.inputEl);
+          search
+            .setPlaceholder("Example: folder1/folder2")
+            .setValue(this.plugin.settings.folder)
+            .onChange((folder) => {
+              this.plugin.settings.folder = folder;
+              this.save();
+            });
+        });
+      },
+    };
+  }
+
+  private fileNameRow(): Row {
+    return {
+      name: "New file name",
+      aliases: ["File name format"],
+      render: (setting) => {
+        setting.setClass("book-search-plugin__settings--new_file_name");
+        // Built into descEl (not a detached fragment) so it renders on all
+        // Obsidian versions.
+        setting.descEl.createSpan({
+          text: "Enter the file name format. Example: ",
+        });
+        const hint = setting.descEl.createEl("code", {
+          text:
+            replaceDateInString(this.plugin.settings.fileNameFormat) ||
+            "{{title}} - {{author}}",
+        });
+        setting.addSearch((search) => {
+          new FileNameFormatSuggest(this.app, search.inputEl);
+          search
+            .setPlaceholder("Example: {{title}} - {{author}}")
+            .setValue(this.plugin.settings.fileNameFormat)
+            .onChange((value) => {
+              this.plugin.settings.fileNameFormat = value?.trim();
+              this.save();
+              hint.textContent =
+                replaceDateInString(value) || "{{title}} - {{author}}";
+            });
+        });
+      },
+    };
+  }
+
+  private frontmatterRow(): Row {
+    return {
+      name: "Frontmatter",
+      desc: "The frontmatter that is inserted into the text.",
+      aliases: ["Properties", "Template language"],
+      render: (setting) => {
+        setting.settingEl.addClass("bsp-tall-row");
+        // The buttons go straight into the description element: a detached
+        // DocumentFragment passed to setDesc() rendered as "[object
+        // DocumentFragment]" and hid them.
+        const buttons = setting.descEl.createDiv({
+          cls: "book-search-plugin__settings-button-group",
+        });
+        buttons
+          .createEl("button", { text: "Restore default", cls: "mod-warning" })
+          .addEventListener("click", () => {
+            this.plugin.settings.frontmatter = DEFAULT_SETTINGS.frontmatter;
+            this.saveAndRefresh();
+          });
+
+        // A themed Obsidian menu (not the OS menu) of the built-in templates.
+        buttons
+          .createEl("button", { text: "Language" })
+          .addEventListener("click", (event) => {
+            const menu = new Menu();
+            menu.setUseNativeMenu(false);
+            const current = this.plugin.settings.frontmatter;
+            for (const [language, template] of Object.entries(
+              FRONTMATTER_TEMPLATES,
+            )) {
+              menu.addItem((item) =>
+                item
+                  .setTitle(language)
+                  .setChecked(template === current)
+                  .onClick(() => {
+                    this.plugin.settings.frontmatter = template;
+                    this.saveAndRefresh();
+                  }),
+              );
+            }
+            menu.showAtMouseEvent(event);
+          });
+
+        setting.addTextArea((text) => {
+          text.inputEl.rows = 15;
+          text.inputEl.cols = 40;
+          text.inputEl.addClass("book-search-plugin__settings--textarea");
+          text
+            .setPlaceholder("Enter the frontmatter")
+            .setValue(this.plugin.settings.frontmatter)
+            .onChange((value) => {
+              this.plugin.settings.frontmatter = value;
+              this.save();
+            });
+        });
+      },
+    };
+  }
+
+  private templateFileRow(): Row {
+    return {
+      name: "Template file",
+      desc: "Files will be available as templates.",
+      render: (setting) => {
+        setting.descEl.createDiv().createEl("a", {
+          text: "Example template",
+          href: `${docUrl}#example-template`,
+        });
+        setting.addSearch((search) => {
+          new FileSuggest(this.app, search.inputEl);
+          search
+            .setPlaceholder("Example: templates/template-file")
+            .setValue(this.plugin.settings.templateFile)
+            .onChange((file) => {
+              this.plugin.settings.templateFile = file;
+              this.save();
+            });
+        });
+      },
+    };
+  }
+
+  private contentRow(): Row {
+    return {
+      name: "Content",
+      desc: "This content is automatically added to every new book note after the frontmatter. Use it to include default headings (e.g., # Thoughts), reading logs, or inline scripts for further customization.",
+      render: (setting) => {
+        setting.settingEl.addClass("bsp-tall-row");
+        setting.addTextArea((text) => {
+          text.inputEl.rows = 10;
+          text.inputEl.cols = 40;
+          text.inputEl.addClass("book-search-plugin__settings--textarea");
+          text
+            .setPlaceholder("Enter the content")
+            .setValue(this.plugin.settings.content)
+            .onChange((value) => {
+              this.plugin.settings.content = value;
+              this.save();
+            });
+        });
+      },
+    };
+  }
+
+  private coverModeRow(): Row {
+    return {
+      name: "Cover mode",
+      desc: "Choose how {{localCoverImage}} is populated: download to vault (local), keep a remote URL, or disable.",
+      aliases: ["Cover image"],
+      render: (setting) => {
+        setting.addDropdown((dropdown) =>
+          dropdown
+            .addOption("local", "Local (download)")
+            .addOption("remote", "Remote URL")
+            .addOption("none", "None")
+            .setValue(this.plugin.settings.coverImageMode)
+            .onChange((value) => {
+              this.plugin.settings.coverImageMode = value as
+                | "local"
+                | "remote"
+                | "none";
+              // The cover path is shown only for local covers.
+              this.saveAndRefresh();
+            }),
+        );
+      },
+    };
+  }
+
+  private coverExtensionRow(): Row {
+    return {
+      name: "Cover file extension",
+      desc: "File extension used when saving covers locally.",
+      render: (setting) => {
+        setting.addDropdown((dropdown) =>
+          dropdown
+            .addOption("jpg", "JPG")
+            .addOption("png", "PNG")
+            .addOption("webp", "WebP")
+            .setValue(this.plugin.settings.coverImageFileExtension)
+            .onChange((value) => {
+              this.plugin.settings.coverImageFileExtension = value as
+                | "jpg"
+                | "png"
+                | "webp";
+              this.save();
+            }),
+        );
+      },
+    };
+  }
+
+  private coverPathRow(): Row {
+    return {
+      name: "Cover image path",
+      desc: "Path where cover images are saved (Cover mode: Local).",
+      visible: () => this.plugin.settings.coverImageMode === "local",
+      render: (setting) => {
+        setting.addSearch((search) => {
+          new FolderSuggest(this.app, search.inputEl);
+          search
+            .setPlaceholder("Example: images/covers")
+            .setValue(this.plugin.settings.coverImagePath)
+            .onChange((value) => {
+              this.plugin.settings.coverImagePath = value.trim();
+              this.save();
+            });
+        });
+      },
+    };
+  }
+
+  // ── Sources ─────────────────────────────────────────────────────────────
+
+  private defaultSourceRow(): Row {
     const options: ReadonlyArray<[ServiceProvider, string]> = [
       [ServiceProvider.google, "Google Books"],
       [ServiceProvider.goodreads, "Goodreads"],
       [ServiceProvider.openlibrary, "Open Library"],
       [ServiceProvider.storygraph, "StoryGraph (needs your login)"],
       [ServiceProvider.hardcover, "Hardcover (needs a token)"],
-      [ServiceProvider.librarything, "LibraryThing (needs a key)"],
+      [ServiceProvider.librarything, "LibraryThing (needs a token)"],
       [ServiceProvider.calibre, "Calibre (your library)"],
     ];
-    new Setting(containerEl)
-      .setName("Default source")
-      .setDesc(
-        "The source searched by the Create new book note and Insert the metadata commands. The ribbon button lets you choose each time.",
-      )
-      .addDropdown((dropDown) => {
-        for (const [id, label] of options) dropDown.addOption(id, label);
-        dropDown
-          .setValue(
-            this.plugin.settings.serviceProvider ?? ServiceProvider.google,
-          )
-          .onChange((value) => {
-            this.plugin.settings.serviceProvider = value as ServiceProvider;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-  }
-
-  private createPreferredLocaleSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Preferred language")
-      .setDesc(
-        "Language of the results from Google Books, Hardcover and LibraryThing.",
-      )
-      .addDropdown((dropDown) => {
-        const defaultLocale = window.moment.locale();
-        dropDown.addOption(
-          defaultLocale,
-          `Same as Obsidian: ${languages[defaultLocale] || defaultLocale}`,
-        );
-        Object.keys(languages).forEach((locale) => {
-          const localeName = (languages as Record<string, string>)[locale];
-          if (localeName && locale !== defaultLocale)
-            dropDown.addOption(locale, localeName);
+    return {
+      name: "Default source",
+      desc: "The source searched by the Create new book note and Insert the metadata commands. The ribbon button lets you choose each time.",
+      render: (setting) => {
+        setting.addDropdown((dropdown) => {
+          for (const [id, label] of options) dropdown.addOption(id, label);
+          dropdown
+            .setValue(
+              this.plugin.settings.serviceProvider ?? ServiceProvider.google,
+            )
+            .onChange((value) => {
+              this.plugin.settings.serviceProvider = value as ServiceProvider;
+              this.save();
+            });
         });
-        const localeValue = this.plugin.settings.localePreference;
-        dropDown
-          .setValue(
-            localeValue === DEFAULT_SETTINGS.localePreference
-              ? defaultLocale
-              : localeValue,
-          )
-          .onChange((value) => {
-            this.plugin.settings.localePreference = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
+      },
+    };
   }
 
-  private createOpenNoteSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Open new book notes")
-      .setDesc("Open each new book note as soon as it is created.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.openPageOnCompletion)
-          .onChange((value) => {
-            this.plugin.settings.openPageOnCompletion = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
+  private preferredLanguageRow(): Row {
+    return {
+      name: "Preferred language",
+      desc: "Language of the results from Google Books, Hardcover and LibraryThing.",
+      aliases: ["Locale"],
+      render: (setting) => {
+        setting.addDropdown((dropdown) => {
+          const defaultLocale = window.moment.locale();
+          dropdown.addOption(
+            defaultLocale,
+            `Same as Obsidian: ${languages[defaultLocale] || defaultLocale}`,
+          );
+          for (const [locale, localeName] of Object.entries(languages)) {
+            if (localeName && locale !== defaultLocale) {
+              dropdown.addOption(locale, localeName);
+            }
+          }
+          const localeValue = this.plugin.settings.localePreference;
+          dropdown
+            .setValue(
+              localeValue === DEFAULT_SETTINGS.localePreference
+                ? defaultLocale
+                : localeValue,
+            )
+            .onChange((value) => {
+              this.plugin.settings.localePreference = value;
+              this.save();
+            });
+        });
+      },
+    };
   }
 
-  private createShowCoverImageInSearchSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Show cover images in search")
-      .setDesc("Show book covers in the list of search results.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.showCoverImageInSearch)
-          .onChange((value) => {
-            this.plugin.settings.showCoverImageInSearch = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-  }
-
-  private createNoSetupSources(containerEl: HTMLElement) {
-    this.createSourceHeading(
-      containerEl,
-      "Goodreads",
-      { kind: "ready", text: "No setup" },
-      [
-        "Works as it is. When Goodreads blocks a book page, the plugin tries other routes and archived copies, so a note can occasionally miss a field such as the publisher.",
-      ],
-    );
-    this.createSourceHeading(
-      containerEl,
-      "Open Library",
-      { kind: "ready", text: "No setup" },
-      ["Works as it is."],
-    );
-  }
-
-  private createGoogleApiSettings(containerEl: HTMLElement) {
+  private googleRows(): Row[] {
     const hasKey = this.plugin.settings.apiKey.length > 0;
-    this.createSourceHeading(
-      containerEl,
-      "Google Books",
-      hasKey
-        ? { kind: "set", text: "Own key saved" }
-        : { kind: "optional", text: "Key optional" },
-      [
-        "Works without setup, but the free quota it shares with every user often runs out (HTTP 429). Your own free API key avoids that.",
-      ],
-    );
-
     let pendingKey = "";
-    new Setting(containerEl)
-      .setName("API key")
-      .setDesc(
+    return [
+      this.sourceRow(
+        "Google Books",
+        "book",
         hasKey
+          ? { kind: "set", text: "Own key saved" }
+          : { kind: "optional", text: "Key optional" },
+        [
+          "Works without setup, but the free quota it shares with every user often runs out (HTTP 429). Your own free API key avoids that.",
+        ],
+      ),
+      {
+        name: "API key",
+        desc: hasKey
           ? "A key is saved. It is not shown again; save a new one to replace it, or save an empty field to remove it."
           : "No key saved; the shared quota is used.",
-      )
-      .addText((text) => {
-        text.inputEl.type = "password";
-        text
-          .setPlaceholder("AIza…")
-          .onChange((value) => (pendingKey = value.trim()));
-      })
-      .addButton((button) =>
-        button.setButtonText("Save key").onClick(() => {
-          this.plugin.settings.apiKey = pendingKey;
-          void this.plugin.saveSettings().then(() => {
-            new Notice(
-              pendingKey
-                ? "Google Books API key saved"
-                : "Google Books API key removed",
+        aliases: ["Google Books"],
+        render: (setting) => {
+          pendingKey = "";
+          setting
+            .addText((text) => {
+              text.inputEl.type = "password";
+              text
+                .setPlaceholder("AIza…")
+                .onChange((value) => (pendingKey = value.trim()));
+            })
+            .addButton((button) =>
+              button.setButtonText("Save key").onClick(() => {
+                const key = pendingKey;
+                this.plugin.settings.apiKey = key;
+                void this.plugin.saveSettings().then(() => {
+                  new Notice(
+                    key
+                      ? "Google Books API key saved"
+                      : "Google Books API key removed",
+                  );
+                  this.refresh();
+                });
+              }),
             );
-            this.display();
-          });
-        }),
-      );
-
-    this.createGuide(containerEl, "How to get a free Google Books API key", [
-      [
-        "Open ",
-        {
-          link: "Google Cloud Console",
-          href: "https://console.cloud.google.com/",
         },
-        " and choose or create a project.",
-      ],
-      [
-        "Go to ",
-        { strong: "APIs & Services → Library" },
-        ", search for ",
-        { strong: "Books API" },
-        " and enable it.",
-      ],
-      [
-        "Go to ",
-        { strong: "APIs & Services → Credentials" },
-        " and choose ",
-        { strong: "Create credentials → API key" },
-        ".",
-      ],
-      ["Copy the key, paste it above and press ", { strong: "Save key" }, "."],
-    ]);
-
-    new Setting(containerEl)
-      .setName("Ask for the language on each search")
-      .setDesc("Show a language menu in the Google Books search window.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.askForLocale).onChange((value) => {
-          this.plugin.settings.askForLocale = value;
-          void this.plugin.saveSettings().catch((err) => console.warn(err));
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Page-curl effect on covers")
-      .setDesc("Ask Google Books for covers with a curled page corner.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableCoverImageEdgeCurl)
-          .onChange((value) => {
-            this.plugin.settings.enableCoverImageEdgeCurl = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-  }
-
-  /**
-   * A secret field (Obsidian's secret storage) or, on Obsidian versions
-   * without it, a password field. `test` adds a button that reports on it.
-   */
-  private createSecretSetting(
-    containerEl: HTMLElement,
-    name: string,
-    description: string,
-    key: "hardcoverApiToken" | "librarythingApiKey",
-    placeholder: string,
-    test: () => Promise<string>,
-  ) {
-    const setting = new Setting(containerEl).setName(name).setDesc(description);
-    if (secretStorageAvailable(this.app)) {
-      setting.addComponent((el) =>
-        new SecretComponent(this.app, el)
-          .setValue(this.plugin.settings[key])
-          .onChange((value) => {
-            this.plugin.settings[key] = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-    } else {
-      setting.addText((text) => {
-        text.inputEl.type = "password";
-        text
-          .setPlaceholder(placeholder)
-          .setValue(this.plugin.settings[key])
-          .onChange((value) => {
-            this.plugin.settings[key] = value.trim();
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          });
-      });
-    }
-    setting.addButton((button) =>
-      button.setButtonText("Test").onClick(() => {
-        button.setDisabled(true);
-        void test()
-          .then((report) => new Notice(`${name}:\n${report}`, 60_000))
-          .finally(() => button.setDisabled(false));
-      }),
-    );
-  }
-
-  private createHardcoverApiSettings(containerEl: HTMLElement) {
-    this.createSourceHeading(
-      containerEl,
-      "Hardcover",
-      this.plugin.settings.hardcoverApiToken
-        ? { kind: "set", text: "Token saved" }
-        : { kind: "needed", text: "Needs a token" },
-      ["Hardcover's official API, used with your personal token."],
-    );
-    this.createSecretSetting(
-      containerEl,
-      "Hardcover token",
-      "Kept in Obsidian's secret storage.",
-      "hardcoverApiToken",
-      "eyJhbGci…",
-      () => this.plugin.checkHardcover(),
-    );
-    this.createGuide(containerEl, "How to get your Hardcover token", [
-      [
-        "Sign in at ",
-        { link: "hardcover.app", href: "https://hardcover.app" },
-        ".",
-      ],
-      [
-        "Open ",
-        {
-          link: "hardcover.app/account/api",
-          href: "https://hardcover.app/account/api",
-        },
-        " (Account → API) and copy the token. It works with or without the word ",
-        { code: "Bearer" },
-        " in front.",
-      ],
-      [
-        "Click ",
-        { strong: "Link…" },
-        " above, create a secret and paste the token into it.",
-      ],
-      ["Press ", { strong: "Test" }, "."],
-    ]);
-  }
-
-  private createLibraryThingApiSettings(containerEl: HTMLElement) {
-    this.createSourceHeading(
-      containerEl,
-      "LibraryThing",
-      this.plugin.settings.librarythingApiKey
-        ? { kind: "set", text: "Key saved" }
-        : { kind: "needed", text: "Needs a key" },
-      [
-        "LibraryThing's services API, used with your developer key. It also fills the Common Knowledge variables such as ",
-        { code: "{{characters}}" },
-        " and ",
-        { code: "{{places}}" },
-        ".",
-      ],
-    );
-    this.createSecretSetting(
-      containerEl,
-      "LibraryThing developer key",
-      "Kept in Obsidian's secret storage.",
-      "librarythingApiKey",
-      "developer key",
-      () => this.plugin.checkLibraryThing(),
-    );
-    this.createGuide(
-      containerEl,
-      "How to get a LibraryThing developer key",
-      [
-        ["Sign in to LibraryThing; a free account is enough."],
+      },
+      this.guideRow(
+        "How to get a free Google Books API key",
         [
-          "Open ",
-          {
-            link: "librarything.com/services/keys.php",
-            href: "https://www.librarything.com/services/keys.php",
-          },
-          " and copy your developer key.",
+          [
+            "Open the ",
+            {
+              link: "Credentials page",
+              href: "https://console.cloud.google.com/apis/credentials",
+            },
+            " of Google Cloud Console, and choose or create a project if it asks.",
+          ],
+          [
+            "Choose ",
+            { strong: "Create credentials → API key" },
+            " and copy the key.",
+          ],
+          [
+            "Optionally choose ",
+            { strong: "Restrict key" },
+            ": if ",
+            { strong: "Books API" },
+            " is listed under API restrictions, select it; otherwise leave the key unrestricted.",
+          ],
+          ["Paste the key above and press ", { strong: "Save key" }, "."],
         ],
         [
-          "Click ",
-          { strong: "Link…" },
-          " above, create a secret and paste the key into it.",
+          [
+            "You don't need to find the API in the API Library. Google lists it as \"Books API\", and its documentation says to skip enabling it when it isn't listed.",
+          ],
         ],
-        ["Press ", { strong: "Test" }, "."],
-      ],
-      [
-        [
-          'LibraryThing sometimes answers automated requests for its book pages with a "High traffic" page. The Common Knowledge variables can then come out empty.',
-        ],
-      ],
-    );
+      ),
+      this.toggleRow(
+        "Ask for the language on each search",
+        "Show a language menu in the Google Books search window.",
+        "askForLocale",
+        ["Google Books"],
+      ),
+      this.toggleRow(
+        "Page-curl effect on covers",
+        "Ask Google Books for covers with a curled page corner.",
+        "enableCoverImageEdgeCurl",
+        ["Google Books"],
+      ),
+    ];
   }
 
-  private createStoryGraphLoginSettings(containerEl: HTMLElement) {
+  private storyGraphRows(): Row[] {
     const saved =
       !!this.plugin.settings.storygraphSessionCookie ||
       !!this.plugin.settings.storygraphRememberToken;
-    this.createSourceHeading(
-      containerEl,
+    const heading = this.sourceRow(
       "StoryGraph",
+      "trending-up",
       saved
         ? { kind: "set", text: "Login saved" }
         : { kind: "needed", text: "Needs your login" },
@@ -1081,405 +1652,411 @@ export class BookSearchSettingTab extends PluginSettingTab {
       ],
     );
 
-    if (!secretStorageAvailable(this.app)) {
-      new Setting(containerEl).setDesc(
-        "The login needs Obsidian's secret storage, which this version of Obsidian does not have. Update Obsidian to use StoryGraph.",
-      );
-      return;
+    if (!requireApiVersion("1.11.4")) {
+      return [
+        heading,
+        this.noteRow(
+          "The login needs Obsidian's secret storage, which this version of Obsidian does not have. Update Obsidian to use StoryGraph.",
+        ),
+      ];
     }
 
-    const cookieSetting = (
-      name: string,
-      cookie: string,
-      key: "storygraphSessionCookie" | "storygraphRememberToken",
-    ) =>
-      new Setting(containerEl)
-        .setName(name)
-        .setDesc(`The value of the ${cookie} cookie.`)
-        .addComponent((el) =>
-          new SecretComponent(this.app, el)
-            .setValue(this.plugin.settings[key])
-            .onChange((value) => {
-              this.plugin.settings[key] = value;
-              void this.plugin.saveSettings().catch((err) => console.warn(err));
+    return [
+      heading,
+      this.secretRow("Session cookie", "storygraphSessionCookie", {
+        desc: "The value of the _storygraph_session cookie.",
+        aliases: ["StoryGraph login"],
+      }),
+      this.secretRow("Remember-me cookie", "storygraphRememberToken", {
+        desc: "The value of the remember_user_token cookie.",
+        aliases: ["StoryGraph login"],
+      }),
+      {
+        name: "Check the login",
+        desc: "Runs one test search on StoryGraph with the saved login.",
+        aliases: ["StoryGraph login"],
+        render: (setting) => {
+          setting.addButton((button) =>
+            button.setButtonText("Test login").onClick(() => {
+              button.setDisabled(true);
+              void this.plugin
+                .checkStoryGraphLogin()
+                .then((message) => new Notice(message, 15_000))
+                .finally(() => {
+                  // A block, not an expression: setDisabled() returns the
+                  // button, and Obsidian's components have a chaining then(),
+                  // so returning it here would make the promise resolve with
+                  // itself, forever, and freeze Obsidian.
+                  button.setDisabled(false);
+                });
             }),
-        );
-    cookieSetting(
-      "Session cookie",
-      "_storygraph_session",
-      "storygraphSessionCookie",
-    );
-    cookieSetting(
-      "Remember-me cookie",
-      "remember_user_token",
-      "storygraphRememberToken",
-    );
+          );
+        },
+      },
+      this.guideRow(
+        "How to get your StoryGraph login (about two minutes, on a computer)",
+        [
+          [
+            "Sign in at ",
+            {
+              link: "app.thestorygraph.com",
+              href: "https://app.thestorygraph.com",
+            },
+            " with ",
+            { strong: "Remember me" },
+            " ticked.",
+          ],
+          [
+            "Open the developer tools and find the cookies:",
+            {
+              list: [
+                [
+                  { strong: "Chrome, Edge or Brave:" },
+                  " press Cmd+Option+I (Mac) or F12, then open ",
+                  {
+                    strong:
+                      "Application → Cookies → https://app.thestorygraph.com",
+                  },
+                  ".",
+                ],
+                [
+                  { strong: "Firefox:" },
+                  " press Cmd+Option+I (Mac) or F12, then open ",
+                  {
+                    strong: "Storage → Cookies → https://app.thestorygraph.com",
+                  },
+                  ".",
+                ],
+                [
+                  { strong: "Safari:" },
+                  " turn on ",
+                  {
+                    strong:
+                      "Settings → Advanced → Show features for web developers",
+                  },
+                  ", then open ",
+                  {
+                    strong: "Develop → Show Web Inspector → Storage → Cookies",
+                  },
+                  ".",
+                ],
+              ],
+            },
+          ],
+          [
+            "Copy the value of ",
+            { code: "_storygraph_session" },
+            " and the value of ",
+            { code: "remember_user_token" },
+            ".",
+          ],
+          [
+            "For each one, click ",
+            { strong: "Link…" },
+            " above, create a secret and paste the value into it.",
+          ],
+          ["Press ", { strong: "Test login" }, "."],
+        ],
+        [
+          [
+            { strong: "Treat these values like your password:" },
+            " anyone who has them can use your StoryGraph account. They stay in Obsidian's secret storage (Settings → Keychain), not in your vault's files, and the plugin sends them only to app.thestorygraph.com.",
+          ],
+          [
+            "When StoryGraph stops accepting them (they expire, or you sign out everywhere), the plugin says so; repeat these steps. StoryGraph can change how it treats unofficial clients like this one at any time.",
+          ],
+        ],
+      ),
+    ];
+  }
 
-    new Setting(containerEl)
-      .setName("Check the login")
-      .setDesc("Runs one test search on StoryGraph with the saved login.")
-      .addButton((button) =>
-        button.setButtonText("Test login").onClick(() => {
-          button.setDisabled(true);
-          void this.plugin
-            .checkStoryGraphLogin()
-            .then((message) => new Notice(message, 15_000))
-            .finally(() => button.setDisabled(false));
-        }),
-      );
-
-    this.createGuide(
-      containerEl,
-      "How to get your StoryGraph login (about two minutes, on a computer)",
-      [
+  private hardcoverRows(): Row[] {
+    return [
+      this.sourceRow(
+        "Hardcover",
+        "book-marked",
+        this.plugin.settings.hardcoverApiToken
+          ? { kind: "set", text: "Token saved" }
+          : { kind: "needed", text: "Needs a token" },
+        ["Hardcover's official API, used with your personal token."],
+      ),
+      this.secretRow("Hardcover token", "hardcoverApiToken", {
+        placeholder: "eyJhbGci…",
+        test: () => this.plugin.checkHardcover(),
+      }),
+      this.guideRow("How to get your Hardcover token", [
         [
           "Sign in at ",
-          {
-            link: "app.thestorygraph.com",
-            href: "https://app.thestorygraph.com",
-          },
-          " with ",
-          { strong: "Remember me" },
-          " ticked.",
-        ],
-        [
-          "Open the developer tools and find the cookies:",
-          {
-            list: [
-              [
-                { strong: "Chrome, Edge or Brave:" },
-                " press Cmd+Option+I (Mac) or F12, then open ",
-                {
-                  strong:
-                    "Application → Cookies → https://app.thestorygraph.com",
-                },
-                ".",
-              ],
-              [
-                { strong: "Firefox:" },
-                " press Cmd+Option+I (Mac) or F12, then open ",
-                { strong: "Storage → Cookies → https://app.thestorygraph.com" },
-                ".",
-              ],
-              [
-                { strong: "Safari:" },
-                " turn on ",
-                {
-                  strong:
-                    "Settings → Advanced → Show features for web developers",
-                },
-                ", then open ",
-                { strong: "Develop → Show Web Inspector → Storage → Cookies" },
-                ".",
-              ],
-            ],
-          },
-        ],
-        [
-          "Copy the value of ",
-          { code: "_storygraph_session" },
-          " and the value of ",
-          { code: "remember_user_token" },
+          { link: "hardcover.app", href: "https://hardcover.app" },
           ".",
         ],
         [
-          "For each one, click ",
+          "Open ",
+          {
+            link: "hardcover.app/account/api",
+            href: "https://hardcover.app/account/api",
+          },
+          " (Account → API) and copy the token. It works with or without the word ",
+          { code: "Bearer" },
+          " in front.",
+        ],
+        [
+          "Click ",
           { strong: "Link…" },
-          " above, create a secret and paste the value into it.",
+          " above, create a secret and paste the token into it.",
         ],
-        ["Press ", { strong: "Test login" }, "."],
-      ],
-      [
-        [
-          { strong: "Treat these values like your password:" },
-          " anyone who has them can use your StoryGraph account. They stay in Obsidian's secret storage (Settings → Keychain), not in your vault's files, and the plugin sends them only to app.thestorygraph.com.",
-        ],
-        [
-          "When StoryGraph stops accepting them (they expire, or you sign out everywhere), the plugin says so; repeat these steps. StoryGraph can change how it treats unofficial clients like this one at any time.",
-        ],
-      ],
-    );
-  }
-
-  private createCalibreSettings(containerEl: HTMLElement) {
-    this.createSourceHeading(
-      containerEl,
-      "Calibre",
-      { kind: "optional", text: "Your library" },
-      [
-        "Search and import from your own Calibre library, through Calibre's content server.",
-      ],
-    );
-    new Setting(containerEl)
-      .setName("Server address")
-      .setDesc("Where Calibre's content server listens.")
-      .addText((text) =>
-        text
-          .setPlaceholder("http://localhost:8080")
-          .setValue(this.plugin.settings.calibreServerUrl)
-          .onChange((value) => {
-            this.plugin.settings.calibreServerUrl = value
-              .trim()
-              .replace(/\/+$/, "");
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-    new Setting(containerEl)
-      .setName("Library ID")
-      .setDesc("Usually the folder name of your library.")
-      .addText((text) =>
-        text
-          .setPlaceholder("calibre")
-          .setValue(this.plugin.settings.calibreLibraryId)
-          .onChange((value) => {
-            this.plugin.settings.calibreLibraryId = value.trim();
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-    this.createGuide(containerEl, "How to turn on Calibre's content server", [
-      [
-        "In Calibre, choose ",
-        { strong: "Connect/share → Start Content server" },
-        ".",
-      ],
-      [
-        "To have it start with Calibre, open ",
-        { strong: "Preferences → Sharing over the net" },
-        " and tick ",
-        { strong: "Run server automatically when calibre starts" },
-        ".",
-      ],
-      [
-        "On the same computer the address is ",
-        { code: "http://localhost:8080" },
-        ". From a phone or another computer, use this computer's network address instead, such as ",
-        { code: "http://192.168.1.50:8080" },
-        ".",
-      ],
-    ]);
-  }
-
-  private createWarnOnDuplicateSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Warn on duplicate")
-      .setDesc(
-        "Show a warning before creating a note if one already exists for this book.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.warnOnDuplicate)
-          .onChange((value) => {
-            this.plugin.settings.warnOnDuplicate = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-  }
-
-  private createEnableSeriesLinkingSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Enable series linking")
-      .setDesc(
-        "Fill {{seriesLink}} with a [[wikilink]] to the book's series. {{series}} and {{seriesNumber}} are always available. Add the ones you want to your template.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableSeriesLinking)
-          .onChange((value) => {
-            this.plugin.settings.enableSeriesLinking = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-  }
-
-  private createSearchHistorySizeSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Search history size")
-      .setDesc("Number of recent searches to remember (0 to disable).")
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 20, 1)
-          .setValue(this.plugin.settings.maxSearchHistory)
-          .setDynamicTooltip()
-          .onChange((value) => {
-            this.plugin.settings.maxSearchHistory = value;
-            void this.plugin.saveSettings().catch((err) => console.warn(err));
-          }),
-      );
-  }
-
-  private createClearSearchHistorySetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Clear search history")
-      .setDesc(
-        `Currently storing ${this.plugin.settings.searchHistory?.length || 0} search(es).`,
-      )
-      .addButton((button) =>
-        button.setButtonText("Clear").onClick(() => {
-          this.plugin.settings.searchHistory = [];
-          void this.plugin.saveSettings().then(() => {
-            new Notice("Search history cleared");
-            // Refresh to update count
-            this.display();
-          });
-        }),
-      );
-  }
-
-  private createShowIndividualServiceButtonsSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("A button for each source")
-      .setDesc(
-        "Add Goodreads, Open Library, StoryGraph, Google Books, LibraryThing and Hardcover buttons to the window the ribbon button opens. Global Search, Calibre and Bulk Import are always there.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.showIndividualServiceButtons)
-          .onChange(async (value) => {
-            this.plugin.settings.showIndividualServiceButtons = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-  }
-
-  private createDiagnosticsSettings(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Diagnostics mode")
-      .setDesc(
-        "Enable verbose logging (Developer Tools console) and richer provider failure details. " +
-          "Useful when a scraper or API changes and results suddenly disappear.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.diagnosticsEnabled)
-          .onChange(async (value) => {
-            this.plugin.settings.diagnosticsEnabled = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("HTTP cache")
-      .setDesc(
-        "Cache GET responses in-memory to speed up repeated searches. Clearing also ends the pause on a source that was blocking requests.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.httpCacheEnabled)
-          .onChange(async (value) => {
-            this.plugin.settings.httpCacheEnabled = value;
-            await this.plugin.saveSettings();
-          }),
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Clear").onClick(() => {
-          clearHttpCache();
-          new Notice("HTTP cache cleared");
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("HTTP cache TTL (minutes)")
-      .setDesc("How long cached responses are kept before expiring.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 60, 1)
-          .setValue(this.plugin.settings.httpCacheTtlMinutes)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.httpCacheTtlMinutes = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Rate limit (ms per host)")
-      .setDesc(
-        "Minimum delay between requests to the same domain. Higher values reduce blocking.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 2000, 50)
-          .setValue(this.plugin.settings.httpRateLimitMs)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.httpRateLimitMs = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Retry count")
-      .setDesc("How many times to retry transient failures (429/5xx/timeouts).")
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 5, 1)
-          .setValue(this.plugin.settings.httpMaxRetries)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.httpMaxRetries = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Retry base delay (ms)")
-      .setDesc("Initial retry delay; each subsequent retry doubles.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(100, 5000, 50)
-          .setValue(this.plugin.settings.httpRetryBaseDelayMs)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.httpRetryBaseDelayMs = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-  }
-
-  private createProviderHealthSummary(containerEl: HTMLElement) {
-    const now = Date.now();
-    const services: Array<{ id: string; label: string }> = [
-      { id: "goodreads", label: "Goodreads" },
-      { id: "google", label: "Google Books" },
-      { id: "openlibrary", label: "OpenLibrary" },
-      { id: "storygraph", label: "StoryGraph" },
-      { id: "hardcover", label: "Hardcover" },
-      { id: "librarything", label: "LibraryThing" },
-      { id: "calibre", label: "Calibre" },
+        ["Press ", { strong: "Test" }, "."],
+      ]),
     ];
+  }
 
-    new Setting(containerEl).setDesc(
-      "Reliability of each source over the last three days. Hover a dot for that day's details; use Copy report when filing an issue.",
-    );
+  private libraryThingRows(): Row[] {
+    return [
+      this.sourceRow(
+        "LibraryThing",
+        "bookmark",
+        this.plugin.settings.librarythingApiKey
+          ? { kind: "set", text: "Token saved" }
+          : { kind: "needed", text: "Needs a token" },
+        [
+          "LibraryThing's Talpa search, used with your free API token. It also fills the Common Knowledge variables such as ",
+          { code: "{{characters}}" },
+          " and ",
+          { code: "{{places}}" },
+          ".",
+        ],
+      ),
+      this.secretRow("LibraryThing API token", "librarythingApiKey", {
+        placeholder: "API token",
+        test: () => this.plugin.checkLibraryThing(),
+      }),
+      this.guideRow(
+        "How to get a LibraryThing API token",
+        [
+          [
+            "Sign in to ",
+            { link: "LibraryThing", href: "https://www.librarything.com" },
+            ", or create a free account.",
+          ],
+          [
+            "Open the ",
+            {
+              link: "Developer Hub",
+              href: "https://www.librarything.com/developer",
+            },
+            " while signed in and copy your API token.",
+          ],
+          [
+            "Click ",
+            { strong: "Link…" },
+            " above, create a secret and paste the token into it.",
+          ],
+          ["Press ", { strong: "Test" }, "."],
+        ],
+        [
+          [
+            "The free token allows 50 searches a day, one per second; for more, LibraryThing asks you to write to talpa@librarything.com.",
+          ],
+          [
+            'LibraryThing sometimes answers automated requests for its book pages with a "High traffic" page. The Common Knowledge variables can then come out empty.',
+          ],
+        ],
+      ),
+    ];
+  }
 
-    const wrap = containerEl.createDiv({ cls: "bsp-perf-wrap" });
-    for (const svc of services) {
-      this.renderServicePerformance(wrap, svc.label, svc.id, now);
-    }
+  private calibreRows(): Row[] {
+    return [
+      this.sourceRow(
+        "Calibre",
+        "hard-drive",
+        { kind: "optional", text: "Your library" },
+        [
+          "Search and import from your own Calibre library, through Calibre's content server.",
+        ],
+      ),
+      {
+        name: "Server address",
+        desc: "Where Calibre's content server listens.",
+        aliases: ["Calibre"],
+        render: (setting) => {
+          setting.addText((text) =>
+            text
+              .setPlaceholder("http://localhost:8080")
+              .setValue(this.plugin.settings.calibreServerUrl)
+              .onChange((value) => {
+                this.plugin.settings.calibreServerUrl = value
+                  .trim()
+                  .replace(/\/+$/, "");
+                this.save();
+              }),
+          );
+        },
+      },
+      {
+        name: "Library ID",
+        desc: "Usually the folder name of your library.",
+        aliases: ["Calibre"],
+        render: (setting) => {
+          setting.addText((text) =>
+            text
+              .setPlaceholder("calibre")
+              .setValue(this.plugin.settings.calibreLibraryId)
+              .onChange((value) => {
+                this.plugin.settings.calibreLibraryId = value.trim();
+                this.save();
+              }),
+          );
+        },
+      },
+      this.guideRow("How to turn on Calibre's content server", [
+        [
+          "In Calibre, choose ",
+          { strong: "Connect/share → Start Content server" },
+          ".",
+        ],
+        [
+          "To have it start with Calibre, open ",
+          { strong: "Preferences → Sharing over the net" },
+          " and tick ",
+          { strong: "Run server automatically when calibre starts" },
+          ".",
+        ],
+        [
+          "On the same computer the address is ",
+          { code: "http://localhost:8080" },
+          ". From a phone or another computer, use this computer's network address instead, such as ",
+          { code: "http://192.168.1.50:8080" },
+          ".",
+        ],
+      ]),
+    ];
+  }
 
-    new Setting(containerEl)
-      .addButton((btn) =>
-        btn
-          .setButtonText("Copy report")
-          .setCta()
-          .onClick(() => {
-            void navigator.clipboard
-              .writeText(this.buildDiagnosticsReport(now))
-              .then(
-                () => new Notice("Diagnostics report copied to clipboard"),
-                () => new Notice("Could not access the clipboard"),
-              );
+  // ── Search & merging ────────────────────────────────────────────────────
+
+  private clearSearchHistoryRow(): Row {
+    return {
+      name: "Clear search history",
+      desc: `Currently storing ${this.plugin.settings.searchHistory?.length || 0} search(es).`,
+      render: (setting) => {
+        setting.addButton((button) =>
+          button.setButtonText("Clear").onClick(() => {
+            this.plugin.settings.searchHistory = [];
+            void this.plugin.saveSettings().then(() => {
+              new Notice("Search history cleared");
+              // Shows the new count.
+              this.refresh();
+            });
           }),
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Reset").onClick(() => {
-          resetProviderHealth();
-          clearHistory();
-          this.plugin.flushProviderHistory();
-          new Notice("Provider history reset");
-          this.display();
-        }),
-      );
+        );
+      },
+    };
+  }
+
+  private movePreferenceToFront(field: string, preferred: string): void {
+    const prefs = this.plugin.settings.fieldSourcePreferences || {};
+    const current = prefs[field] || [];
+    prefs[field] = [preferred, ...current.filter((p) => p !== preferred)];
+    this.plugin.settings.fieldSourcePreferences = prefs;
+  }
+
+  private fieldSourceRow(field: string, label: string): Row {
+    return {
+      name: label,
+      aliases: ["Preferred source", "When sources disagree"],
+      render: (setting) => {
+        setting.addDropdown((dropdown) => {
+          for (const source of MERGE_SOURCES) {
+            dropdown.addOption(source.id, source.label);
+          }
+          dropdown
+            .setValue(
+              this.plugin.settings.fieldSourcePreferences?.[field]?.[0] ||
+                "primary",
+            )
+            .onChange((value) => {
+              this.movePreferenceToFront(field, value);
+              this.save();
+            });
+        });
+      },
+    };
+  }
+
+  // ── Diagnostics ─────────────────────────────────────────────────────────
+
+  private httpCacheRow(): Row {
+    return {
+      name: "HTTP cache",
+      desc: "Cache GET responses in-memory to speed up repeated searches. Clearing also ends the pause on a source that was blocking requests.",
+      render: (setting) => {
+        setting
+          .addToggle((toggle) =>
+            toggle
+              .setValue(this.plugin.settings.httpCacheEnabled)
+              .onChange((value) => {
+                this.plugin.settings.httpCacheEnabled = value;
+                this.save();
+              }),
+          )
+          .addButton((button) =>
+            button.setButtonText("Clear").onClick(() => {
+              clearHttpCache();
+              new Notice("HTTP cache cleared");
+            }),
+          );
+      },
+    };
+  }
+
+  private servicePerformanceRow(): Row {
+    return {
+      name: "",
+      searchable: false,
+      render: (setting) => {
+        const { settingEl } = setting;
+        settingEl.empty();
+        settingEl.addClass("bsp-block-row");
+        const wrap = settingEl.createDiv({ cls: "bsp-perf-wrap" });
+        const now = Date.now();
+        for (const service of PERFORMANCE_SERVICES) {
+          this.renderServicePerformance(wrap, service.label, service.id, now);
+        }
+      },
+    };
+  }
+
+  private serviceReportRow(): Row {
+    return {
+      name: "",
+      searchable: false,
+      render: (setting) => {
+        setting
+          .addButton((button) =>
+            button
+              .setButtonText("Copy report")
+              .setCta()
+              .onClick(() => {
+                void navigator.clipboard
+                  .writeText(this.buildDiagnosticsReport(Date.now()))
+                  .then(
+                    () => new Notice("Diagnostics report copied to clipboard"),
+                    () => new Notice("Could not access the clipboard"),
+                  );
+              }),
+          )
+          .addButton((button) =>
+            button.setButtonText("Reset").onClick(() => {
+              resetProviderHealth();
+              clearHistory();
+              this.plugin.flushProviderHistory();
+              new Notice("Provider history reset");
+              this.refresh();
+            }),
+          );
+      },
+    };
   }
 
   private renderServicePerformance(
@@ -1592,271 +2169,33 @@ export class BookSearchSettingTab extends PluginSettingTab {
     return lines.join("\n");
   }
 
-  private movePreferenceToFront(field: string, preferred: string): void {
-    const prefs = this.plugin.settings.fieldSourcePreferences || {};
-    const current = prefs[field] || [];
-    const next = [preferred, ...current.filter((p) => p !== preferred)];
-    prefs[field] = next;
-    this.plugin.settings.fieldSourcePreferences = prefs;
-  }
+  // ── Support ─────────────────────────────────────────────────────────────
 
-  private createFieldSourcePreferencesSetting(containerEl: HTMLElement) {
-    const fields: Array<{ field: string; label: string }> = [
-      { field: "description", label: "Description" },
-      { field: "categories", label: "Categories" },
-      { field: "publisher", label: "Publisher" },
-      { field: "publishDate", label: "Publish date" },
-      { field: "totalPage", label: "Page count" },
-      { field: "coverUrl", label: "Cover URL" },
-      { field: "translator", label: "Translator" },
-      { field: "originalTitle", label: "Original title" },
-    ];
-
-    const sources: Array<{ id: string; label: string }> = [
-      { id: "primary", label: "Primary (selected source)" },
-      { id: "goodreads", label: "Goodreads" },
-      { id: "storygraph", label: "StoryGraph" },
-      { id: "google", label: "Google Books" },
-      { id: "openlibrary", label: "OpenLibrary" },
-      { id: "fable", label: "Fable (passive)" },
-      { id: "loc", label: "Library of Congress (passive)" },
-    ];
-
-    containerEl.createEl("p", {
-      cls: "bsp-section-note",
-      text: "When several sources have a value for a field, the one chosen here wins. Fable and the Library of Congress are consulted only for fields where you choose them.",
-    });
-
-    fields.forEach(({ field, label }) => {
-      const currentTop =
-        this.plugin.settings.fieldSourcePreferences?.[field]?.[0] || "primary";
-
-      new Setting(containerEl).setName(label).addDropdown((dropdown) => {
-        sources.forEach((s) => {
-          dropdown.addOption(s.id, s.label);
+  private supportCardRow(): Row {
+    return {
+      name: "Support on Ko-fi",
+      aliases: ["Donate"],
+      render: (setting) => {
+        const { settingEl } = setting;
+        settingEl.empty();
+        settingEl.addClass("bsp-block-row");
+        const card = settingEl.createDiv({ cls: "bsp-support" });
+        setIcon(card.createDiv({ cls: "bsp-support-icon" }), "heart");
+        card.createDiv({
+          cls: "bsp-support-title",
+          text: "Enjoying Global Book Search?",
         });
-        dropdown.setValue(currentTop).onChange((value) => {
-          this.movePreferenceToFront(field, value);
-          void this.plugin.saveSettings();
+        card.createEl("p", {
+          text: "Global Book Search is free and open source, made and maintained by DuckTapeKiller. If it is useful to you, you can support its development on Ko-fi.",
         });
-      });
-    });
-  }
-
-  private createCoverModeSetting(containerEl: HTMLElement) {
-    new Setting(containerEl)
-      .setName("Cover mode")
-      .setDesc(
-        "Choose how {{localCoverImage}} is populated: download to vault (local), keep a remote URL, or disable.",
-      )
-      .addDropdown((dropdown) => {
-        dropdown
-          .addOption("local", "Local (download)")
-          .addOption("remote", "Remote URL")
-          .addOption("none", "None")
-          .setValue(this.plugin.settings.coverImageMode)
-          .onChange(async (value) => {
-            this.plugin.settings.coverImageMode = value as
-              | "local"
-              | "remote"
-              | "none";
-            await this.plugin.saveSettings();
-            this.display();
-          });
-      });
-
-    new Setting(containerEl)
-      .setName("Cover file extension")
-      .setDesc("File extension used when saving covers locally.")
-      .addDropdown((dropdown) => {
-        dropdown
-          .addOption("jpg", "jpg")
-          .addOption("png", "png")
-          .addOption("webp", "webp")
-          .setValue(this.plugin.settings.coverImageFileExtension)
-          .onChange(async (value) => {
-            this.plugin.settings.coverImageFileExtension = value as
-              | "jpg"
-              | "png"
-              | "webp";
-            await this.plugin.saveSettings();
-          });
-      });
-  }
-
-  private createTemplateFileSetting(containerEl: HTMLElement) {
-    const setting = new Setting(containerEl).setName("Template file");
-    setting.descEl.createDiv({
-      text: "Files will be available as templates.",
-    });
-    setting.descEl.createEl("a", {
-      text: "Example template",
-      href: `${docUrl}#example-template`,
-    });
-    setting.addSearch((cb) => {
-      try {
-        new FileSuggest(this.app, cb.inputEl);
-      } catch {
-        // ignore
-      }
-      cb.setPlaceholder("Example: templates/template-file")
-        .setValue(this.plugin.settings.templateFile)
-        .onChange((newTemplateFile) => {
-          this.plugin.settings.templateFile = newTemplateFile;
-          void this.plugin.saveSettings().catch((err) => console.warn(err));
+        const kofi = card.createEl("a", {
+          cls: "bsp-support-button",
+          href: KOFI_URL,
+          attr: { "aria-label": "Support DuckTapeKiller on Ko-fi" },
         });
-    });
-  }
-
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.addClass("book-search-plugin__settings");
-
-    const tabBar = containerEl.createDiv({
-      cls: "bsp-tabs",
-      attr: { role: "tablist" },
-    });
-    for (const tab of SETTINGS_TABS) {
-      const active = tab.id === this.activeTab;
-      const button = tabBar.createEl("button", {
-        cls: active ? "bsp-tab is-active" : "bsp-tab",
-        attr: { type: "button", role: "tab", "aria-selected": String(active) },
-      });
-      setIcon(button.createSpan({ cls: "bsp-tab-icon" }), tab.icon);
-      button.createSpan({ text: tab.label });
-      button.addEventListener("click", () => {
-        if (this.activeTab === tab.id) return;
-        this.activeTab = tab.id;
-        this.display();
-      });
-    }
-
-    const current =
-      SETTINGS_TABS.find((tab) => tab.id === this.activeTab) ??
-      SETTINGS_TABS[0];
-    const body = containerEl.createDiv({
-      cls: "bsp-tab-body",
-      attr: { role: "tabpanel" },
-    });
-    body.createEl("p", { cls: "bsp-tab-intro", text: current.intro });
-
-    switch (current.id) {
-      case "notes":
-        this.renderNotesTab(body);
-        break;
-      case "sources":
-        this.renderSourcesTab(body);
-        break;
-      case "search":
-        this.renderSearchTab(body);
-        break;
-      case "diagnostics":
-        this.renderDiagnosticsTab(body);
-        break;
-      case "support":
-        this.renderSupportTab(body);
-        break;
-    }
-  }
-
-  private renderNotesTab(containerEl: HTMLElement) {
-    this.createHeader("Where notes go", containerEl);
-    this.createFileLocationSetting(containerEl);
-    this.createFileNameFormatSetting(containerEl);
-    this.createOpenNoteSetting(containerEl);
-
-    this.createHeader("What a note contains", containerEl);
-    this.createFrontmatterSetting(containerEl);
-    this.createTemplateFileSetting(containerEl);
-    this.createContentSetting(containerEl);
-    this.createEnableSeriesLinkingSetting(containerEl);
-
-    this.createHeader("Tags", containerEl);
-    this.createTagSettings(containerEl);
-
-    this.createHeader("Covers", containerEl);
-    this.createCoverModeSetting(containerEl);
-    if (this.plugin.settings.coverImageMode === "local") {
-      this.createCoverImagePathSetting(containerEl);
-    }
-  }
-
-  private renderSourcesTab(containerEl: HTMLElement) {
-    this.createHeader("Searching", containerEl);
-    this.createDefaultSourceSetting(containerEl);
-    this.createPreferredLocaleSetting(containerEl);
-    this.createShowCoverImageInSearchSetting(containerEl);
-    this.createShowIndividualServiceButtonsSetting(containerEl);
-
-    this.createHeader("Sources", containerEl);
-    this.createNoSetupSources(containerEl);
-    this.createGoogleApiSettings(containerEl);
-    this.createStoryGraphLoginSettings(containerEl);
-    this.createHardcoverApiSettings(containerEl);
-    this.createLibraryThingApiSettings(containerEl);
-    this.createCalibreSettings(containerEl);
-  }
-
-  private renderSearchTab(containerEl: HTMLElement) {
-    this.createHeader("Before a note is created", containerEl);
-    this.createWarnOnDuplicateSetting(containerEl);
-
-    this.createHeader("Search history", containerEl);
-    this.createSearchHistorySizeSetting(containerEl);
-    this.createClearSearchHistorySetting(containerEl);
-
-    this.createHeader("When sources disagree", containerEl);
-    this.createFieldSourcePreferencesSetting(containerEl);
-  }
-
-  private renderSupportTab(containerEl: HTMLElement) {
-    const card = containerEl.createDiv({ cls: "bsp-support" });
-    setIcon(card.createDiv({ cls: "bsp-support-icon" }), "heart");
-    card.createDiv({
-      cls: "bsp-support-title",
-      text: "Enjoying Global Book Search?",
-    });
-    card.createEl("p", {
-      text: "Global Book Search is free and open source, made and maintained by DuckTapeKiller. If it is useful to you, you can support its development on Ko-fi.",
-    });
-    const kofi = card.createEl("a", {
-      cls: "bsp-support-button",
-      href: KOFI_URL,
-      attr: { "aria-label": "Support DuckTapeKiller on Ko-fi" },
-    });
-    setIcon(kofi.createSpan({ cls: "bsp-support-button-icon" }), "coffee");
-    kofi.createSpan({ text: "Support on Ko-fi" });
-
-    this.createHeader("Help and feedback", containerEl);
-    new Setting(containerEl)
-      .setName("Report a problem or suggest a feature")
-      .setDesc(
-        "Open an issue on GitHub. For a problem with a source, include the report from Diagnostics → Copy report.",
-      )
-      .addButton((button) =>
-        button
-          .setButtonText("Open issues")
-          .onClick(() => window.open(`${docUrl}/issues`)),
-      );
-    new Setting(containerEl)
-      .setName("Star the project")
-      .setDesc("A star on GitHub helps other readers find the plugin.")
-      .addButton((button) =>
-        button
-          .setButtonText("Open on GitHub")
-          .onClick(() => window.open(docUrl)),
-      );
-    new Setting(containerEl)
-      .setName("Version")
-      .setDesc(`Global Book Search ${this.plugin.manifest.version}`);
-  }
-
-  private renderDiagnosticsTab(containerEl: HTMLElement) {
-    this.createHeader("Network", containerEl);
-    this.createDiagnosticsSettings(containerEl);
-
-    this.createHeader("Service performance", containerEl);
-    this.createProviderHealthSummary(containerEl);
+        setIcon(kofi.createSpan({ cls: "bsp-support-button-icon" }), "coffee");
+        kofi.createSpan({ text: "Support on Ko-fi" });
+      },
+    };
   }
 }

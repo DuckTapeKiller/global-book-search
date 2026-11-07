@@ -579,7 +579,9 @@ export async function probeLibraryThing(apiToken?: string): Promise<string> {
   const lines: string[] = [];
 
   if (!token) {
-    lines.push("Talpa search: no token set (Settings → LibraryThing API key).");
+    lines.push(
+      "Talpa search: no key set (Settings → Global Book Search → Sources → LibraryThing).",
+    );
   } else {
     try {
       const res = await httpRequest(

@@ -202,6 +202,8 @@ export function toStringFrontMatter(frontMatter: object): string {
 
       const isNumericStringKey =
         key.toLowerCase().includes("isbn") ||
+        // An ASIN is often an ISBN-10 with a leading zero (0140445285).
+        key.toLowerCase().includes("asin") ||
         key.toLowerCase().includes("páginas") ||
         key.toLowerCase().includes("pages") ||
         key.toLowerCase().includes("pagine") ||

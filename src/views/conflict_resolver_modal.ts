@@ -25,7 +25,7 @@ export class ConflictResolverModal extends Modal {
     this.modalEl.addClass("book-search-accuracy-modal");
     this.modalEl.addClass("conflict-resolver-modal");
 
-    contentEl.createEl("h2", { text: "Data Conflict Resolver" });
+    contentEl.createEl("h2", { text: "Data conflict resolver" });
     contentEl.createEl("p", {
       text: "Sources disagree on the following fields. Please pick the most accurate data for your vault.",
       cls: "modal-description",
@@ -90,7 +90,7 @@ export class ConflictResolverModal extends Modal {
           cls: "source-name",
         });
         if (choice.isQuorum) {
-          sourceRow.createSpan({ text: "Most Frequent", cls: "quorum-tag" });
+          sourceRow.createSpan({ text: "Most frequent", cls: "quorum-tag" });
         }
       });
     });
@@ -98,7 +98,7 @@ export class ConflictResolverModal extends Modal {
     const footer = contentEl.createDiv({ cls: "modal-footer" });
     new Setting(footer).addButton((btn) => {
       btn
-        .setButtonText("Finalize Accurate Note")
+        .setButtonText("Finalize accurate note")
         .setCta()
         .onClick(() => {
           this._submitted = true;

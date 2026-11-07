@@ -8,15 +8,6 @@
   --bsp-shadow: none;
 }
 
-@keyframes bsp-shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
 @keyframes bsp-fade-in-up {
   from {
     opacity: 0;
@@ -131,28 +122,47 @@ body .modal.book-search-global-modal.modal.book-search-global-modal {
   overflow: visible;
 }
 
-/* Modal Progress Fill Effect */
-.modal.book-search-global-modal.is-searching::before,
-.modal.book-search-input-modal.is-searching::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 4px;
-  width: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--interactive-accent),
-    transparent
-  );
-  background-size: 200% 100%;
-  animation: bsp-shimmer 2s infinite linear;
-  z-index: 100;
+/* Searching: the source dots pulse one after another in the theme's accent,
+   a relay, and each settles on its source's answer (views/source_relay.ts).
+   Nothing is drawn on the window's edges, so square and round corners look
+   the same. */
+.bsp-health-dot.is-pending {
+  background-color: var(--interactive-accent);
+  box-shadow: none;
+  animation: bsp-relay 1.2s ease-in-out infinite;
+  animation-delay: calc(var(--bsp-relay-index, 0) * 150ms);
 }
 
-.modal.book-search-global-modal.is-searching {
-  border-top: var(--border-width) solid var(--interactive-accent);
+.bsp-health-dot.is-settled {
+  animation: bsp-relay-settle 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes bsp-relay {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes bsp-relay-settle {
+  from {
+    transform: scale(1.7);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bsp-health-dot.is-pending,
+  .bsp-health-dot.is-settled {
+    animation: none;
+  }
 }
 
 /* Modal Branding Header */
@@ -975,10 +985,62 @@ body
   width: 100%;
 }
 
-body .book-search-global-subtitle.book-search-global-subtitle {
-  text-align: center;
+/* The sources of a global search, three to a row, each dot above its name. */
+.book-search-global-sources {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Rows further apart than a dot is from its name, so each dot reads as
+     its own source's. */
+  gap: var(--size-4-3);
+  box-sizing: border-box;
   width: 100%;
-  display: block;
+  max-width: 355px;
+  margin: 0 auto var(--size-4-2);
+}
+
+.book-search-global-source {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--size-2-2);
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  color: var(--text-muted);
+}
+
+.book-search-global-source .bsp-health-dot {
+  margin: 0;
+}
+
+/* A source that needs a token or a login before it can search. */
+.book-search-global-source.is-not-set-up {
+  color: var(--text-faint);
+}
+
+.book-search-global-source-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* On a phone the grid is smaller and takes the status line's place, so the
+   window stays above the keyboard: the dots show how each source answered,
+   and a tap on a source says why. */
+.is-phone .book-search-global-sources {
+  gap: 8px var(--size-4-2);
+  margin-bottom: 6px;
+}
+
+.is-phone .book-search-global-source {
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.is-phone .book-search-global-status {
+  display: none;
 }
 
 .book-search-input-modal input[type="text"],
@@ -1004,12 +1066,21 @@ body .modal.book-search-global-modal.book-search-global-modal button.mod-cta {
   min-width: 120px;
 }
 
+/* One line, cut short rather than wrapped, so the window keeps its height
+   while it searches (and on a phone its place above the keyboard). */
 .book-search-global-status {
-  text-align: center;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  height: 1.2em;
   margin-top: 10px;
+  overflow: hidden;
   font-size: 0.8em;
+  line-height: 1.2;
   color: var(--text-muted);
-  min-height: 1.2em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 body.is-mobile .book-search-global-status {
@@ -1192,6 +1263,7 @@ body .book-search-accuracy-modal.book-search-accuracy-modal {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: var(--size-4-2);
   font-size: 0.75em;
 }
 
@@ -1207,6 +1279,8 @@ body .book-search-accuracy-modal.book-search-accuracy-modal {
   font-size: 0.85em;
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Badges */
@@ -1485,6 +1559,11 @@ body.is-mobile
   border-top: 1px solid var(--background-modifier-border);
 }
 
+/* The first service sits under the row's own divider: no second line. */
+.bsp-perf-wrap > .bsp-perf-service:first-child {
+  border-top: none;
+}
+
 .bsp-perf-header {
   display: flex;
   align-items: center;
@@ -1582,12 +1661,90 @@ body.is-mobile
   line-height: 1.5;
 }
 
+/* ── Settings: rows that hold a block (guides, service report, support) ── */
+.setting-item.bsp-block-row {
+  display: block;
+}
+
+/* Rows with a text area keep their label beside the top of the box. */
+.setting-item.bsp-tall-row {
+  align-items: flex-start;
+}
+
+/* Obsidian 1.13 shows a slider's value beside it; older versions do not, so
+   the row shows it. */
+.bsp-slider-value {
+  min-width: 3em;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+/* ── Settings: section and source titles with an icon ─────────────────── */
+/* The icon sits in a small badge tinted with the theme's accent, sized in em
+   so it follows whichever heading it is in. */
+.bsp-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+}
+
+.bsp-section-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: var(--radius-s);
+  background-color: color-mix(
+    in srgb,
+    var(--interactive-accent) 16%,
+    transparent
+  );
+  color: var(--text-accent);
+}
+
+.bsp-section-icon svg {
+  width: 1em;
+  height: 1em;
+}
+
+/* The tabbed page's large headings keep the badge at a modest size. */
+.book-search-plugin__header .bsp-section-icon {
+  font-size: 0.7em;
+}
+
+/* ── Settings: the five page entries, each with its icon ──────────────── */
+.setting-item > .bsp-page-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--icon-m) + var(--size-4-4));
+  height: calc(var(--icon-m) + var(--size-4-4));
+  margin-inline-end: var(--size-4-3);
+  border-radius: var(--radius-m);
+  background-color: color-mix(
+    in srgb,
+    var(--interactive-accent) 16%,
+    transparent
+  );
+  color: var(--text-accent);
+}
+
+.setting-item > .bsp-page-icon svg {
+  width: var(--icon-m);
+  height: var(--icon-m);
+}
+
 /* ── Settings: one heading per source, with a status label ─────────────── */
 .book-search-plugin__settings .bsp-source-heading {
   margin-top: var(--size-4-4);
 }
 
-.book-search-plugin__settings .bsp-source-heading .setting-item-name {
+.bsp-source-heading .setting-item-name {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1596,7 +1753,7 @@ body.is-mobile
   font-weight: var(--font-semibold);
 }
 
-.book-search-plugin__settings .bsp-status {
+.bsp-status {
   padding: 0 var(--size-4-2);
   border-radius: var(--radius-l);
   font-size: var(--font-ui-smaller);
@@ -1605,24 +1762,24 @@ body.is-mobile
   white-space: nowrap;
 }
 
-.book-search-plugin__settings .bsp-status--ready,
-.book-search-plugin__settings .bsp-status--set {
+.bsp-status--ready,
+.bsp-status--set {
   background-color: rgba(var(--color-green-rgb), 0.14);
   color: var(--color-green);
 }
 
-.book-search-plugin__settings .bsp-status--optional {
+.bsp-status--optional {
   background-color: var(--background-modifier-hover);
   color: var(--text-muted);
 }
 
-.book-search-plugin__settings .bsp-status--needed {
+.bsp-status--needed {
   background-color: rgba(var(--color-orange-rgb), 0.14);
   color: var(--color-orange);
 }
 
 /* ── Settings: step-by-step guides ─────────────────────────────────────── */
-.book-search-plugin__settings .bsp-guide {
+.bsp-guide {
   margin: var(--size-4-1) 0 var(--size-4-3);
   padding: var(--size-4-2) var(--size-4-3);
   border: var(--border-width) solid var(--background-modifier-border);
@@ -1631,43 +1788,43 @@ body.is-mobile
   font-size: var(--font-ui-small);
 }
 
-.book-search-plugin__settings .bsp-guide > summary {
+.bsp-guide > summary {
   color: var(--text-accent);
   font-weight: var(--font-medium);
   cursor: pointer;
 }
 
-.book-search-plugin__settings .bsp-guide[open] > summary {
+.bsp-guide[open] > summary {
   margin-bottom: var(--size-4-2);
 }
 
-.book-search-plugin__settings .bsp-guide ol {
+.bsp-guide ol {
   margin: 0;
   padding-inline-start: 1.4em;
 }
 
-.book-search-plugin__settings .bsp-guide li {
+.bsp-guide li {
   margin: var(--size-4-1) 0;
   line-height: 1.55;
 }
 
-.book-search-plugin__settings .bsp-guide p {
+.bsp-guide p {
   margin: var(--size-4-2) 0 0;
   color: var(--text-muted);
   line-height: 1.55;
 }
 
-.book-search-plugin__settings .bsp-guide code {
+.bsp-guide code {
   font-size: 0.95em;
 }
 
-.book-search-plugin__settings .bsp-guide ul {
+.bsp-guide ul {
   margin: var(--size-4-1) 0 0;
   padding-inline-start: 1.2em;
 }
 
 /* ── Settings: support tab ─────────────────────────────────────────────── */
-.book-search-plugin__settings .bsp-support {
+.bsp-support {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1680,24 +1837,24 @@ body.is-mobile
   text-align: center;
 }
 
-.book-search-plugin__settings .bsp-support-icon {
+.bsp-support-icon {
   display: inline-flex;
   color: var(--color-red);
 }
 
-.book-search-plugin__settings .bsp-support-icon svg {
+.bsp-support-icon svg {
   width: 36px;
   height: 36px;
   fill: currentColor;
 }
 
-.book-search-plugin__settings .bsp-support-title {
+.bsp-support-title {
   font-size: var(--font-ui-large);
   font-weight: var(--font-semibold);
   color: var(--text-normal);
 }
 
-.book-search-plugin__settings .bsp-support p {
+.bsp-support p {
   max-width: 34em;
   margin: 0;
   color: var(--text-muted);
@@ -1705,7 +1862,7 @@ body.is-mobile
   line-height: 1.55;
 }
 
-.book-search-plugin__settings .bsp-support-button {
+.bsp-support-button {
   display: inline-flex;
   align-items: center;
   gap: var(--size-4-2);
@@ -1719,16 +1876,16 @@ body.is-mobile
   white-space: nowrap;
 }
 
-.book-search-plugin__settings .bsp-support-button:hover {
+.bsp-support-button:hover {
   background-color: var(--interactive-accent-hover);
   color: var(--text-on-accent);
 }
 
-.book-search-plugin__settings .bsp-support-button-icon {
+.bsp-support-button-icon {
   display: inline-flex;
 }
 
-.book-search-plugin__settings .bsp-support-button-icon svg {
+.bsp-support-button-icon svg {
   width: var(--icon-s);
   height: var(--icon-s);
 }

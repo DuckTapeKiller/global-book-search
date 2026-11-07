@@ -81,7 +81,7 @@ describe("unquoteYamlScalar", () => {
 });
 
 describe("BookNoteCreator.updateMetadata", () => {
-  it("writes bare values, not the template's quotes (Update Metadata)", async () => {
+  it("writes the values a new note would get, not the template's quotes", async () => {
     const properties = await update(
       [
         'Title: "{{title}}"',
@@ -96,7 +96,8 @@ describe("BookNoteCreator.updateMetadata", () => {
     expect(properties).toEqual({
       Title: "The Colour of Magic",
       Pages: "287",
-      Summary: 'He said "hello" twice.',
+      // A new note's description has its quotes turned into « », as here.
+      Summary: "He said «hello» twice.",
       Series: "[[Discworld]]",
       Author: "Terry Pratchett",
       Rating: 5,
@@ -106,8 +107,79 @@ describe("BookNoteCreator.updateMetadata", () => {
   it("keeps list properties as lists of bare values", async () => {
     const properties = await update("tags: {{tags}}", {});
     expect(Array.isArray(properties.tags)).toBe(true);
-    for (const tag of properties.tags as unknown[]) {
-      expect(String(tag)).not.toMatch(/^"/);
+    for (const tag of properties.tags as string[]) {
+      expect(tag).not.toMatch(/^"/);
     }
+  });
+
+  it("leaves fixed template values to the reader", async () => {
+    const properties = await update(
+      ["Title: {{title}}", "Read: false", "Date read:", 'Prologue: ""'].join(
+        "\n",
+      ),
+      { Read: true, "Date read": "2026-01-05", Prologue: "Neil Gaiman" },
+    );
+
+    expect(properties).toEqual({
+      Title: "The Colour of Magic",
+      Read: true,
+      "Date read": "2026-01-05",
+      Prologue: "Neil Gaiman",
+    });
+  });
+
+  it("never erases a value with one the sources left empty", async () => {
+    const properties = await update(
+      ["Translator: {{translator}}", "Publisher: {{publisher}}"].join("\n"),
+      { Translator: "Cristina Macía" },
+    );
+
+    expect(properties.Translator).toBe("Cristina Macía");
+    // A property the note lacks is added as a new note would have it.
+    expect(properties).toHaveProperty("Publisher", "");
+  });
+
+  it("gives values the types a new note would give them", async () => {
+    const properties = await update(
+      [
+        "Series number: {{seriesNumber}}",
+        'Pages: "{{totalPage}}"',
+        "Series: {{seriesLink}}",
+      ].join("\n"),
+      { "Series number": "STALE" },
+    );
+
+    expect(properties["Series number"]).toBe(1);
+    expect(properties.Pages).toBe("287");
+    expect(properties.Series).toBe("[[Discworld]]");
+  });
+});
+
+describe("BookNoteCreator.create", () => {
+  it("gives a second note of the same book a free name instead of failing", async () => {
+    const existing = new Set([
+      "The Colour of Magic - Terry Pratchett.md",
+      "The Colour of Magic - Terry Pratchett 1.md",
+    ]);
+    const created: string[] = [];
+    const app = {
+      vault: {
+        getAbstractFileByPath: (path: string) =>
+          existing.has(path) ? ({ path } as TFile) : null,
+        create: (path: string) => {
+          if (existing.has(path)) throw new Error("File already exists.");
+          created.push(path);
+          return Promise.resolve({ path } as TFile);
+        },
+      },
+    } as unknown as App;
+
+    const file = await new BookNoteCreator(
+      app,
+      settings("Title: {{title}}"),
+    ).create({ ...book });
+
+    expect(file.path).toBe("The Colour of Magic - Terry Pratchett 2.md");
+    expect(created).toEqual(["The Colour of Magic - Terry Pratchett 2.md"]);
   });
 });

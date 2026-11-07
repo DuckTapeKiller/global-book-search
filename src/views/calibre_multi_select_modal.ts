@@ -20,22 +20,22 @@ export class CalibreMultiSelectModal extends Modal {
     modalEl.addClass("calibre-multi-select-modal");
 
     // Header
-    contentEl.createEl("h2", { text: "Select Books to Import" });
+    contentEl.createEl("h2", { text: "Select books to import" });
 
     // Action bar
     const actionBar = contentEl.createDiv({
       cls: "calibre-multi-select-actions",
     });
 
-    const selectAllBtn = actionBar.createEl("button", { text: "Select All" });
+    const selectAllBtn = actionBar.createEl("button", { text: "Select all" });
     selectAllBtn.addEventListener("click", () => this.selectAll());
 
     const deselectAllBtn = actionBar.createEl("button", {
-      text: "Deselect All",
+      text: "Deselect all",
     });
     deselectAllBtn.addEventListener("click", () => this.deselectAll());
 
-    this.countEl = actionBar.createEl("span", {
+    this.countEl = actionBar.createSpan({
       cls: "calibre-multi-select-count",
       text: "0 selected",
     });
@@ -83,7 +83,7 @@ export class CalibreMultiSelectModal extends Modal {
       const textContainer = item.createDiv({
         cls: "calibre-multi-select-text",
       });
-      textContainer.createEl("div", {
+      textContainer.createDiv({
         cls: "calibre-multi-select-title",
         text: book.title,
       });
@@ -108,7 +108,7 @@ export class CalibreMultiSelectModal extends Modal {
     });
 
     this.importBtn = footer.createEl("button", {
-      text: "Import 0 Books",
+      text: "Import 0 books",
       cls: "mod-cta",
     });
     this.importBtn.disabled = true;
@@ -157,7 +157,7 @@ export class CalibreMultiSelectModal extends Modal {
 
     if (this.importBtn) {
       this.importBtn.textContent =
-        count === 1 ? "Import 1 Book" : `Import ${count} Books`;
+        count === 1 ? "Import 1 book" : `Import ${count} books`;
       this.importBtn.disabled = count === 0;
     }
   }

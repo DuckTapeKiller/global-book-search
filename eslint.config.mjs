@@ -1,55 +1,85 @@
 import obsidianmd from 'eslint-plugin-obsidianmd';
 import globals from 'globals';
+import { defineConfig } from 'eslint/config';
 
-// Official Obsidian plugin-review lint config. `obsidianmd.configs.recommended`
-// bundles typescript-eslint's recommended + recommended-type-checked rules and
-// every obsidianmd/* rule the community-plugin review bot runs — so `npm run
-// lint` here catches the same issues locally, before submitting a release.
-export default [
+// Obsidian's official plugin lint, exactly as the community-plugin review bot
+// runs it: `obsidianmd.configs.recommended` with its own file globs (every
+// TS/JS file, package.json, manifest.json and LICENSE). Only build output and
+// dependencies are left out, and no rule is switched off.
+export default defineConfig([
     {
-        ignores: [
-            'node_modules',
-            'dist',
-            'main.js',
-            'coverage',
-            'jest.config.js',
-            'version-bump.mjs',
-            'esbuild.config.mjs',
-            'eslint.config.mjs',
-            'update_portadas.js',
-            '**/*.test.ts',
-        ],
+        ignores: ['node_modules/', 'main.js', 'coverage/'],
     },
     ...obsidianmd.configs.recommended,
     {
-        files: ['**/*.ts', '**/*.tsx'],
+        // The type-aware rules need the TypeScript program.
+        files: ['**/*.ts'],
         languageOptions: {
-            globals: {
-                ...globals.browser,
-                ...globals.node,
-                console: 'readonly',
-            },
-            // Type-aware rules (no-unsafe-*, no-floating-promises, …) need the
-            // TS program; the plugin config leaves this to the consumer.
             parserOptions: {
-                project: './tsconfig.json',
+                projectService: true,
+                tsconfigRootDir: import.meta.dirname,
             },
-        },
-        rules: {
-            // The review tolerates intentionally-unused, underscore-prefixed names.
-            'no-unused-vars': 'off',
-            '@typescript-eslint/no-unused-vars': [
-                'error',
-                { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
-            ],
-            // `no-undef` produces false positives on TypeScript built-in types
-            // (e.g. PromiseFulfilledResult); TS itself already checks for this,
-            // so typescript-eslint recommends turning it off for .ts files.
-            'no-undef': 'off',
-            // Opinionated UI-casing rule that mis-fires on acronyms ("ISBN") and
-            // on Notice/console message text rather than actual UI labels. Left
-            // off so the build isn't blocked by cosmetic, often-wrong suggestions.
-            'obsidianmd/ui/sentence-case': 'off',
         },
     },
-];
+    {
+        // Obsidian's guidelines ask for sentence case in UI text. The
+        // recommended config leaves this rule off; it is on here, with the
+        // names and acronyms this plugin uses. Both lists replace the rule's
+        // defaults, so the defaults this plugin needs are repeated.
+        files: ['**/*.ts'],
+        rules: {
+            'obsidianmd/ui/sentence-case': [
+                'warn',
+                {
+                    enforceCamelCaseLower: true,
+                    brands: [
+                        'Obsidian',
+                        'GitHub',
+                        'Google',
+                        'Global Book Search',
+                        'Google Books',
+                        'Google Cloud Console',
+                        'Goodreads',
+                        'Open Library',
+                        'OpenLibrary',
+                        'StoryGraph',
+                        'Hardcover',
+                        'LibraryThing',
+                        'Calibre',
+                        'Fable',
+                        'Library of Congress',
+                        'Cloudflare',
+                        'Ko-fi',
+                        'DuckTapeKiller',
+                        'WebP',
+                    ],
+                    acronyms: [
+                        'ID',
+                        'OK',
+                        'JSON',
+                        'YAML',
+                        'HTML',
+                        'HTTPS',
+                        'ISBN',
+                        'ISBNs',
+                        'ASIN',
+                        'API',
+                        'HTTP',
+                        'TTL',
+                        'URL',
+                        'UTC',
+                        'JPG',
+                        'PNG',
+                    ],
+                },
+            ],
+        },
+    },
+    {
+        // Build and maintenance scripts run in Node, not in Obsidian.
+        files: ['*.js', '*.mjs', 'scripts/**/*.js'],
+        languageOptions: {
+            globals: globals.node,
+        },
+    },
+]);

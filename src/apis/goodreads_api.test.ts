@@ -6,7 +6,15 @@ import {
   parseLdJsonBook,
   parseOgMetaBook,
   extractApolloSeries,
+  cleanGoodreadsDescription,
+  extractNextDataJson,
+  parseGoodreadsApollo,
+  isSameAuthorSpelling,
+  goodreadsWorkId,
+  parseGoodreadsEditionsPage,
+  printedBookAsin,
 } from "@apis/goodreads_api";
+import { contributorKind, hardcoverContributorKind } from "@utils/contributors";
 import { Book } from "@models/book.model";
 
 const searchResultBook: Book = {
@@ -224,6 +232,12 @@ describe("parseOgMetaBook", () => {
     expect(book.title).toBe("The Hobbit");
     expect(book.coverUrl).toBe("https://img/cover.jpg");
     expect(book.description).toContain("In a hole in the ground");
+  });
+
+  it("leaves out Goodreads' slogan, which a book without a description gets", () => {
+    // Real og:description of https://www.goodreads.com/book/show/16947642
+    const html = `<meta property="og:description" content="Discover and share books you love on Goodreads." />`;
+    expect(parseOgMetaBook(html).description).toBeUndefined();
   });
 
   it("handles content-before-property attribute order", () => {
@@ -450,5 +464,431 @@ describe("mergeBookData with series", () => {
       seriesNumber: "1",
     });
     expect(merged.series).toBe("Discworld - Rincewind");
+  });
+});
+
+describe("contributorKind", () => {
+  it.each([
+    ["Author", "author"],
+    ["", "author"],
+    ["Pseudonym", "author"],
+    ["Translator", "translator"],
+    ["translator", "translator"],
+    ["Translation", "translator"],
+    ["Traductor", "translator"],
+    ["Tradução", "translator"],
+    ["Traduction", "translator"],
+    ["Übersetzer", "translator"],
+    ["trad.", "translator"],
+    ["Translator, Introduction", "translator"],
+    ["Editor, Translator", "translator"],
+    ["Translator, Afterword by", "translator"],
+    ["Narrator", "narrator"],
+    ["Read by", "narrator"],
+    ["Illustrator", "other"],
+    ["Ilustração", "other"],
+    ["Editor", "other"],
+    ["Introduction", "other"],
+    ["Adaptación", "other"],
+    ["Contributor", "other"],
+  ])("reads the role %j as %s", (role, kind) => {
+    expect(contributorKind(role)).toBe(kind);
+  });
+});
+
+describe("cleanGoodreadsDescription", () => {
+  it("keeps paragraphs apart instead of gluing their words together", () => {
+    expect(
+      cleanGoodreadsDescription(
+        "The year is 1327.<br /><br />Brother William arrives.",
+      ),
+    ).toBe("The year is 1327. Brother William arrives.");
+  });
+
+  it("drops a librarian note that opens the description", () => {
+    expect(
+      cleanGoodreadsDescription(
+        '<i>Alternate cover for this ISBN can be found <a href="https://www.goodreads.com/book/show/1">here</a></i><br /><br />Un amanecer de 1945, un muchacho…',
+      ),
+    ).toBe("Un amanecer de 1945, un muchacho…");
+    expect(
+      cleanGoodreadsDescription(
+        "Librarian note: An alternative cover for this ISBN can be found here.<br><br>Raskolnikov, a student…",
+      ),
+    ).toBe("Raskolnikov, a student…");
+  });
+
+  it("keeps a note that is all the description has, and other italic openings", () => {
+    expect(
+      cleanGoodreadsDescription(
+        "<i>Alternate cover edition of ISBN 9780141439518</i>",
+      ),
+    ).toBe("Alternate cover edition of ISBN 9780141439518");
+    expect(
+      cleanGoodreadsDescription(
+        "<i>The New York Times bestseller</i><br><br>A story.",
+      ),
+    ).toBe("The New York Times bestseller A story.");
+  });
+
+  it("keeps quotation marks as written and decodes entities", () => {
+    expect(
+      cleanGoodreadsDescription(
+        'He said "hello" &amp; left &#8212; &quot;quietly&quot;.',
+      ),
+    ).toBe('He said "hello" & left — "quietly".');
+  });
+});
+
+describe("extractNextDataJson", () => {
+  it("finds the page data in either attribute order", () => {
+    expect(
+      extractNextDataJson(
+        '<script id="__NEXT_DATA__" type="application/json">{"a":1}</script>',
+      ),
+    ).toBe('{"a":1}');
+    expect(
+      extractNextDataJson(
+        '<html><script type="application/json" id="__NEXT_DATA__">{"b":2}</script></html>',
+      ),
+    ).toBe('{"b":2}');
+    expect(extractNextDataJson("<html></html>")).toBe("");
+  });
+});
+
+describe("parseGoodreadsApollo", () => {
+  const link = "https://www.goodreads.com/book/show/119073";
+  const page = (
+    book: Record<string, unknown>,
+    more: Record<string, unknown> = {},
+  ): string =>
+    JSON.stringify({
+      props: {
+        pageProps: {
+          apolloState: {
+            ROOT_QUERY: {
+              'getBookByLegacyId({"legacyId":"119073"})': { __ref: "Book:1" },
+            },
+            "Book:1": book,
+            "Contributor:1": { name: "Umberto Eco" },
+            "Contributor:2": { name: "William  Weaver" },
+            "Contributor:3": { name: "Harold Bloom" },
+            "Contributor:4": { name: "Silvia Cecchini" },
+            "Work:1": {
+              details: {
+                originalTitle: "Il nome della rosa",
+                publicationTime: Date.UTC(1980, 8, 1, 12),
+                places: [{ name: "Italy" }, { name: "Melk, Austria" }],
+                characters: [
+                  { name: "William of Baskerville" },
+                  { name: "Adso of Melk" },
+                ],
+              },
+            },
+            ...more,
+          },
+        },
+      },
+    });
+
+  const roseBook = {
+    title: "The Name of the Rose",
+    titleComplete: "The Name of the Rose",
+    description:
+      '<i>An alternative cover edition can be found here</i><br /><br />The year is 1327. "Brother William" arrives.',
+    imageUrl: "https://images.gr-assets.com/books/1._SY75_.jpg",
+    primaryContributorEdge: {
+      role: "Author",
+      node: { __ref: "Contributor:1" },
+    },
+    secondaryContributorEdges: [
+      { role: "Translator, Introduction", node: { __ref: "Contributor:2" } },
+      { role: "Introduction", node: { __ref: "Contributor:3" } },
+    ],
+    details: {
+      isbn: "0156001314",
+      isbn13: "9780156001311",
+      asin: "0156001314",
+      numPages: 552,
+      publisher: " Houghton Mifflin Harcourt ",
+      publicationTime: Date.UTC(1994, 8, 28, 12),
+      format: "Paperback",
+      language: { name: "Spanish; Castilian" },
+    },
+    work: { __ref: "Work:1" },
+    bookGenres: [
+      { genre: { name: "Fiction" } },
+      { genre: { name: "Mystery" } },
+    ],
+    bookSeries: [],
+  };
+
+  it("reads every field Goodreads has for the edition", () => {
+    const book = parseGoodreadsApollo(page(roseBook), link);
+    expect(book).toMatchObject({
+      title: "The Name of the Rose",
+      author: "Umberto Eco",
+      authors: ["Umberto Eco"],
+      translator: "William Weaver",
+      narrator: "",
+      isbn10: "0156001314",
+      isbn13: "9780156001311",
+      asin: "0156001314",
+      totalPage: "552",
+      publisher: "Houghton Mifflin Harcourt",
+      publishDate: "1994/09/28",
+      format: "Paperback",
+      language: "Spanish",
+      originalTitle: "Il nome della rosa",
+      firstPublishDate: "1980/09/01",
+      places: "Italy; Melk, Austria",
+      characters: "William of Baskerville, Adso of Melk",
+      categories: "Fiction, Mystery",
+      description: 'The year is 1327. "Brother William" arrives.',
+      coverUrl: "https://images.gr-assets.com/books/1._SY475_.jpg",
+      link,
+      series: "",
+    });
+  });
+
+  it("reads an audiobook's narrator and leaves its page count empty", () => {
+    const book = parseGoodreadsApollo(
+      page({
+        ...roseBook,
+        secondaryContributorEdges: [
+          { role: "Narrator", node: { __ref: "Contributor:4" } },
+        ],
+        details: { asin: "B01BY1OLEY", format: "Audible Audio" },
+      }),
+      link,
+    );
+    expect(book?.narrator).toBe("Silvia Cecchini");
+    expect(book?.translator).toBe("");
+    expect(book?.totalPage).toBe("");
+    expect(book?.isbn13).toBe("");
+    expect(book?.asin).toBe("B01BY1OLEY");
+  });
+
+  it("names the primary contributor as author when nobody has the Author role", () => {
+    const book = parseGoodreadsApollo(
+      page({
+        ...roseBook,
+        primaryContributorEdge: {
+          role: "Editor",
+          node: { __ref: "Contributor:3" },
+        },
+        secondaryContributorEdges: [],
+      }),
+      link,
+    );
+    expect(book?.authors).toEqual(["Harold Bloom"]);
+  });
+
+  it("returns null for a page without book data", () => {
+    expect(parseGoodreadsApollo("not json", link)).toBeNull();
+    expect(
+      parseGoodreadsApollo(
+        JSON.stringify({ props: { pageProps: { apolloState: {} } } }),
+        link,
+      ),
+    ).toBeNull();
+  });
+
+  it("reads a printed edition's ISBN from its ASIN when Goodreads has no ISBN", () => {
+    // The Shadow of the Wind, Penguin (book 1232): no ISBN, ASIN 0143034901.
+    const book = parseGoodreadsApollo(
+      page({
+        ...roseBook,
+        details: {
+          ...roseBook.details,
+          isbn: null,
+          isbn13: null,
+          asin: "0143034901",
+        },
+      }),
+      link,
+    );
+    expect(book?.isbn10).toBe("0143034901");
+    expect(book?.isbn13).toBe("9780143034902");
+    expect(book?.asin).toBe("0143034901");
+  });
+
+  it("takes no ISBN from a Kindle ASIN or an ASIN of another edition", () => {
+    const kindle = parseGoodreadsApollo(
+      page({
+        ...roseBook,
+        details: {
+          ...roseBook.details,
+          isbn: null,
+          isbn13: null,
+          asin: "B00ABCDE12",
+        },
+      }),
+      link,
+    );
+    expect(kindle?.isbn10).toBe("");
+    expect(kindle?.isbn13).toBe("");
+    const other = parseGoodreadsApollo(
+      page({
+        ...roseBook,
+        details: { ...roseBook.details, isbn: null, asin: "0143034901" },
+      }),
+      link,
+    );
+    expect(other?.isbn13).toBe("9780156001311");
+    expect(other?.isbn10).toBe("");
+  });
+});
+
+describe("isSameAuthorSpelling", () => {
+  it("joins one author's spellings", () => {
+    expect(
+      isSameAuthorSpelling("Fyodor Dostoevsky", "Fyodor Dostoyevsky"),
+    ).toBe(true);
+    expect(
+      isSameAuthorSpelling("Fyodor Dostoevsky", "Fiódor Dostoiévski"),
+    ).toBe(true);
+    expect(isSameAuthorSpelling("J.R.R. Tolkien", "J. R. R. Tolkien")).toBe(
+      true,
+    );
+  });
+
+  it("never merges co-authors", () => {
+    expect(isSameAuthorSpelling("Neil Gaiman", "Terry Pratchett")).toBe(false);
+    expect(isSameAuthorSpelling("Ann VanderMeer", "Jeff VanderMeer")).toBe(
+      false,
+    );
+    expect(isSameAuthorSpelling("Joe Hill", "Joe Hall")).toBe(false);
+    expect(isSameAuthorSpelling("刘慈欣", "劉慈欣")).toBe(false);
+  });
+});
+
+describe("hardcoverContributorKind", () => {
+  it.each([
+    ["Author", "author"],
+    ["", "author"],
+    ["Co-Author", "author"],
+    ["Writer", "author"],
+    ["Original Author", "author"],
+    ["Translator", "translator"],
+    ["Translation", "translator"],
+    ["Narrator", "narrator"],
+    ["Narration", "narrator"],
+    ["Reader", "narrator"],
+    ["Reading", "narrator"],
+    ["Voice Actor", "narrator"],
+    ["Illustrator", "other"],
+    ["Editor", "other"],
+    ["Introduction", "other"],
+    ["Afterword", "other"],
+    ["Transliteration", "other"],
+  ])("reads Hardcover's role %j as %s", (role, kind) => {
+    expect(hardcoverContributorKind(role)).toBe(kind);
+  });
+});
+
+describe("goodreadsWorkId", () => {
+  it("reads the work of a book page", () => {
+    const json = JSON.stringify({
+      props: {
+        pageProps: {
+          apolloState: {
+            ROOT_QUERY: {
+              'getBookByLegacyId({"legacyId":"11297"})': { __ref: "Book:1" },
+            },
+            "Book:1": { work: { __ref: "Work:1" } },
+            "Work:1": { legacyId: 2956680 },
+          },
+        },
+      },
+    });
+    expect(goodreadsWorkId(json)).toBe("2956680");
+  });
+
+  it("gives nothing for a page without data", () => {
+    expect(goodreadsWorkId("")).toBe("");
+    expect(goodreadsWorkId("{not json")).toBe("");
+  });
+});
+
+describe("parseGoodreadsEditionsPage", () => {
+  // Shaped like goodreads.com/work/editions/2956680 (Norwegian Wood).
+  const edition = (rows: string, details: string): string => `
+    <div class="elementList clearFix">
+      <div class="leftAlignedImage"><a href="/book/show/1"><img alt="" src="" /></a></div>
+      <div class="editionData">
+        ${rows}
+        <div class="moreDetails hideDetails">
+          <div class="dataRow"><div class="dataTitle"> Author(s): </div><div class="dataValue">Haruki Murakami</div></div>
+          ${details}
+        </div>
+      </div>
+    </div>`;
+  const html = [
+    edition(
+      `<div class="dataRow"><a class="bookTitle" href="/book/show/11297">Norwegian Wood (Paperback)</a></div>
+       <div class="dataRow"> Published September 12th 2000 by Vintage Books </div>
+       <div class="dataRow"> First Edition, Paperback, 296 pages </div>`,
+      `<div class="dataRow"><div class="dataTitle"> Edition language: </div><div class="dataValue"> English </div></div>`,
+    ),
+    edition(
+      `<div class="dataRow"><a class="bookTitle" href="/book/show/243736115">Norwegian Wood (Paperback)</a></div>
+       <div class="dataRow"> Published August 2025 by Vintage Books </div>
+       <div class="dataRow"> Paperback, 296 pages </div>`,
+      `<div class="dataRow"><div class="dataTitle"> ISBN: </div><div class="dataValue"> 9780375704024 <span class="greyText"> (ISBN10: 0375704027) </span></div></div>
+       <div class="dataRow"><div class="dataTitle"> ASIN: </div><div class="dataValue"> 0375704027 </div></div>
+       <div class="dataRow"><div class="dataTitle"> Edition language: </div><div class="dataValue"> English </div></div>`,
+    ),
+    edition(
+      `<div class="dataRow"><a class="bookTitle" href="/book/show/2">Tokio Blues: Norwegian Wood (Mass Market Paperback)</a></div>
+       <div class="dataRow"> Published May 6th 2007 by Tusquets Editores S.A. </div>
+       <div class="dataRow"> Mass Market Paperback, 384 pages </div>`,
+      `<div class="dataRow"><div class="dataTitle"> ISBN: </div><div class="dataValue"> 9788483835043 <span class="greyText"> (ISBN10: 8483835045) </span></div></div>
+       <div class="dataRow"><div class="dataTitle"> Edition language: </div><div class="dataValue"> Spanish </div></div>`,
+    ),
+  ].join("\n");
+
+  it("reads every edition's details", () => {
+    const editions = parseGoodreadsEditionsPage(html);
+    expect(editions).toHaveLength(3);
+    expect(editions[0]).toMatchObject({
+      title: "Norwegian Wood",
+      format: "Paperback",
+      publisher: "Vintage Books",
+      publishDate: "2000/09/12",
+      totalPage: "296",
+      isbn13: "",
+      isbn10: "",
+      language: "English",
+    });
+    expect(editions[1]).toMatchObject({
+      publishDate: "2025/08",
+      isbn13: "9780375704024",
+      isbn10: "0375704027",
+    });
+    expect(editions[2]).toMatchObject({
+      title: "Tokio Blues: Norwegian Wood",
+      format: "Mass Market Paperback",
+      publisher: "Tusquets Editores S.A.",
+      language: "Spanish",
+    });
+  });
+
+  it("gives nothing for a page without editions", () => {
+    expect(parseGoodreadsEditionsPage("<html></html>")).toEqual([]);
+  });
+});
+
+describe("printedBookAsin", () => {
+  it.each([
+    ["B0DN8P5BQF", "Paperback", ""],
+    ["B0DN8P5BQF", "Mass Market Paperback", ""],
+    ["B0DN8P5BQF", "Hardcover", ""],
+    ["B0DN8P5BQF", "Kindle Edition", "B0DN8P5BQF"],
+    ["B0DN8P5BQF", "Audible Audio", "B0DN8P5BQF"],
+    ["0156001314", "Paperback", "0156001314"],
+    ["B0DN8P5BQF", "", "B0DN8P5BQF"],
+  ])("%j on a %j edition → %j", (asin, format, expected) => {
+    expect(printedBookAsin(asin, format)).toBe(expected);
   });
 });

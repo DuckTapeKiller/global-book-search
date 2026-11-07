@@ -38,7 +38,7 @@ export function factoryServiceProvider(
         settings.calibreLibraryId,
       );
     case ServiceProvider.openlibrary:
-      return new OpenLibraryApi();
+      return new OpenLibraryApi(resolveLocale(settings.localePreference));
     case ServiceProvider.storygraph:
       return new StoryGraphApi(storyGraphLogin(settings));
     case ServiceProvider.hardcover:

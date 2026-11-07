@@ -1,7 +1,7 @@
 import { factoryServiceProvider } from "@apis/base_api";
 import { Book } from "@models/book.model";
 import { DEFAULT_SETTINGS } from "@settings/settings";
-import { ServiceProvider } from "@src/constants";
+import { GLOBAL_SEARCH_SOURCE_LABELS, ServiceProvider } from "@src/constants";
 import BookSearchPlugin from "@src/main";
 import { ProviderBlockedError } from "@utils/http";
 import languages from "@utils/languages";
@@ -15,6 +15,8 @@ import {
   Platform,
 } from "obsidian";
 import { BarcodeScannerModal } from "./barcode_scanner_modal";
+import { appendHealthDot } from "./health_dot";
+import { SourceRelay } from "./source_relay";
 
 export class BookSearchModal extends Modal {
   private readonly SEARCH_BUTTON_TEXT = "Search";
@@ -24,6 +26,7 @@ export class BookSearchModal extends Modal {
   private okBtnRef?: ButtonComponent;
   private options: { locale: string };
   private searchInput?: TextComponent;
+  private readonly relay = new SourceRelay();
 
   constructor(
     private plugin: BookSearchPlugin,
@@ -35,12 +38,19 @@ export class BookSearchModal extends Modal {
     this.options = { locale: plugin.settings.localePreference };
   }
 
+  /** The source this window searches. */
+  private get service(): string {
+    return this.serviceProviderId || this.plugin.settings.serviceProvider;
+  }
+
   setBusy(busy: boolean): void {
     this.isBusy = busy;
     if (busy) {
       this.modalEl.addClass("is-searching");
+      this.relay.start();
     } else {
       this.modalEl.removeClass("is-searching");
+      this.relay.stop();
     }
     this.okBtnRef
       ?.setDisabled(busy)
@@ -64,6 +74,10 @@ export class BookSearchModal extends Modal {
         this.query,
         this.options,
       );
+      this.relay.settle(
+        this.service,
+        searchResults?.length ? "found" : "empty",
+      );
       if (!searchResults?.length) {
         // Keep the modal open so the user can retry with different terms.
         new Notice(`No results found for "${this.query}"`);
@@ -79,6 +93,7 @@ export class BookSearchModal extends Modal {
     } catch (err) {
       if (err instanceof ProviderBlockedError) {
         // Keep the modal open, as for an empty result, and explain.
+        this.relay.settle(this.service, "failed", err.shortReason);
         new Notice(err.message, 10_000);
         return;
       }
@@ -92,8 +107,7 @@ export class BookSearchModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     this.modalEl.addClass("book-search-input-modal");
-    const service =
-      this.serviceProviderId || this.plugin.settings.serviceProvider;
+    const service = this.service;
 
     // Brand Header
     const headerEl = contentEl.createDiv({
@@ -104,13 +118,17 @@ export class BookSearchModal extends Modal {
     });
     setIcon(iconEl, service === "calibre" ? "library-big" : "book-open");
 
-    headerEl.createEl("h2", {
-      text: service.charAt(0).toUpperCase() + service.slice(1),
+    const titleEl = headerEl.createEl("h2", {
+      text:
+        GLOBAL_SEARCH_SOURCE_LABELS[service] ??
+        service.charAt(0).toUpperCase() + service.slice(1),
       cls: "book-search-plugin__modal-title",
     });
+    // The source's status dot: it pulses while this window searches.
+    this.relay.add(service, appendHealthDot(titleEl, service));
 
     if (!Platform.isMobile) {
-      headerEl.createEl("div", {
+      headerEl.createDiv({
         text: "Search book",
         cls: "book-search-plugin__search-modal--subtitle",
       });

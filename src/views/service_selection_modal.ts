@@ -25,7 +25,7 @@ export class ServiceSelectionModal extends Modal {
     setIcon(iconEl, "library-big");
 
     headerEl.createEl("h2", {
-      text: "Search Books",
+      text: "Search books",
       cls: "book-search-plugin__modal-title",
     });
 
@@ -33,9 +33,9 @@ export class ServiceSelectionModal extends Modal {
       cls: "service-selection-buttons",
     });
 
-    // 1. Global Search (Always)
+    // 1. Global search (always)
     const globalBtn = buttonContainer.createEl("button", {
-      text: "Global Search",
+      text: "Global search",
       cls: "mod-cta book-search-global-btn",
     });
 
@@ -89,9 +89,9 @@ export class ServiceSelectionModal extends Modal {
       })();
     });
 
-    // 2b. Bulk Import (Always)
+    // 2b. Bulk import (always)
     const bulkBtn = buttonContainer.createEl("button", {
-      text: "Bulk Import (ISBN list)",
+      text: "Bulk import (ISBN list)",
       cls: "mod-cta",
     });
 
@@ -104,7 +104,7 @@ export class ServiceSelectionModal extends Modal {
     if (this.plugin.settings.showIndividualServiceButtons) {
       const services = [
         { label: "Goodreads", value: "goodreads" },
-        { label: "OpenLibrary", value: "openlibrary" },
+        { label: "Open Library", value: "openlibrary" },
         { label: "StoryGraph", value: "storygraph" },
         { label: "Google Books", value: "google" },
         { label: "LibraryThing", value: "librarything" },

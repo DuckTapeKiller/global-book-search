@@ -3,6 +3,8 @@
 // Note: This file is mapped to the module name "obsidian" via `jest.config.js`.
 // Do NOT import from "obsidian" within this file, or it will recurse.
 
+import { parse } from "yaml";
+
 export type RequestUrlParam = {
   url: string;
   method?: string;
@@ -20,38 +22,20 @@ export type RequestUrlResponse = {
   text: string;
 };
 
-export async function requestUrl(
+// Unit tests never touch the network: a test that sends requests stubs
+// requestUrl itself (jest.mock("obsidian", ...)) or mocks @utils/http.
+export function requestUrl(
   request: string | RequestUrlParam,
 ): Promise<RequestUrlResponse> {
   const url = typeof request === "string" ? request : request.url;
-  const method = typeof request === "string" ? "GET" : request.method || "GET";
-  const headers = typeof request === "string" ? undefined : request.headers;
-  const body = typeof request === "string" ? undefined : request.body;
+  return Promise.reject(
+    new Error(`requestUrl is not mocked in this test (requested ${url})`),
+  );
+}
 
-  const res = await fetch(url, { method, headers, body: body as BodyInit });
-  const arrayBuffer = await res.arrayBuffer();
-  const text = new TextDecoder().decode(new Uint8Array(arrayBuffer));
-
-  let json: unknown = undefined;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    // ignore non-JSON responses
-  }
-
-  return {
-    status: res.status,
-    headers: (() => {
-      const out: Record<string, string> = {};
-      res.headers.forEach((value, key) => {
-        out[key] = value;
-      });
-      return out;
-    })(),
-    arrayBuffer,
-    json,
-    text,
-  };
+// Obsidian's parseYaml is the yaml package's parser.
+export function parseYaml(text: string): unknown {
+  return parse(text) as unknown;
 }
 
 export function normalizePath(path: string): string {

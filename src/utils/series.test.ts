@@ -43,6 +43,21 @@ describe("parseSeriesFromTitle", () => {
     });
   });
 
+  it("takes the main series when a book is in several", () => {
+    expect(parseSeriesFromTitle("Mort (Discworld, #4; Death, #1)")).toEqual({
+      title: "Mort",
+      series: "Discworld",
+      seriesNumber: "4",
+    });
+    expect(
+      parseSeriesFromTitle("Guards! Guards! (Discworld, #8; City Watch, #1)"),
+    ).toEqual({
+      title: "Guards! Guards!",
+      series: "Discworld",
+      seriesNumber: "8",
+    });
+  });
+
   it("only reads the last parenthesis and leaves earlier ones in the title", () => {
     expect(parseSeriesFromTitle("Mort (Illustrated) (Discworld, #4)")).toEqual({
       title: "Mort (Illustrated)",

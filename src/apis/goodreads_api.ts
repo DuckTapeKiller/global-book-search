@@ -2,8 +2,19 @@ import { Notice } from "obsidian";
 import { Book } from "@models/book.model";
 import { BaseBooksApiImpl } from "@apis/base_api";
 import { getHttpConfig, httpRequest, looksLikeBotChallenge } from "@utils/http";
-import { getArray, getPath, getProp, getString } from "@utils/json";
+import {
+  getArray,
+  getNumber,
+  getPath,
+  getProp,
+  getString,
+  isRecord,
+} from "@utils/json";
 import { parseSeriesFromTitle, seriesFromTitle } from "@utils/series";
+import { contributorKind } from "@utils/contributors";
+import { isIsbn10, toIsbn10, toIsbn13 } from "@utils/existing_note";
+import { parseBookDate } from "@utils/dates";
+import { formatFamily, pickSameEdition } from "@utils/editions";
 
 /**
  * Merge detail-page data into the search-result book without ever letting an
@@ -252,7 +263,10 @@ export function parseOgMetaBook(html: string): Partial<Book> {
   const image = read("og:image");
   if (image) out.coverUrl = image;
   const description = read("og:description");
-  if (description) out.description = description;
+  // A book without a description of its own gets Goodreads' slogan here.
+  if (description && !/^discover and share books you love/i.test(description)) {
+    out.description = description;
+  }
   return out;
 }
 
@@ -303,6 +317,382 @@ export function extractApolloSeries(
   return chosen || { series: "", seriesNumber: "" };
 }
 
+// Notes Goodreads librarians put at the top of a description, which are not
+// part of the book's summary.
+const LIBRARIAN_NOTE =
+  /^(?:librarian'?s?\s+note|(?:an?\s+)?alternat(?:e|ive)\s+(?:cover|edition)|this\s+is\s+(?:an?\s+)?alternat|for\s+(?:an?\s+)?alternat|previously[\s-]+published|also\s+published\s+as|(?:edici[oó]n|portada|cubierta)\s+alternativa|nota\s+(?:del?|de\s+la)\s+bibliotecari)/i;
+
+function htmlToText(html: string): string {
+  return decodeHtmlEntities(
+    (html || "")
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&#(\d+);/g, (_m, code: string) =>
+        String.fromCodePoint(Number(code)),
+      )
+      .replace(/&#x([0-9a-f]+);/gi, (_m, code: string) =>
+        String.fromCodePoint(parseInt(code, 16)),
+      ),
+  );
+}
+
+/**
+ * A Goodreads description as one line of text. The page separates paragraphs
+ * with `<br>`, which plain text extraction dropped, gluing the last word of
+ * one paragraph to the first of the next; here they are kept apart by a space.
+ * Librarian notes that open the description ("Alternate cover edition of
+ * ISBN …") are left out, as long as the summary itself remains. Quotation
+ * marks are kept as written.
+ */
+export function cleanGoodreadsDescription(html: string): string {
+  let rest = (html || "").trim();
+  for (;;) {
+    const lead =
+      /^<(i|b|em|strong)>([\s\S]*?)<\/\1>\s*(?:<br\s*\/?>\s*)*/i.exec(rest);
+    if (!lead || !LIBRARIAN_NOTE.test(htmlToText(lead[2]))) break;
+    const after = rest.slice(lead[0].length);
+    if (!htmlToText(after)) break;
+    rest = after;
+  }
+  const paragraphs = rest
+    .split(/(?:<br\s*\/?>\s*)+|<\/?p(?:\s[^>]*)?>/i)
+    .map(htmlToText)
+    .filter(Boolean);
+  while (paragraphs.length > 1 && LIBRARIAN_NOTE.test(paragraphs[0])) {
+    paragraphs.shift();
+  }
+  return paragraphs.join(" ");
+}
+
+function comparableName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * Whether two author credits are one person spelled two ways, as Goodreads
+ * lists for many translated classics ("Fyodor Dostoevsky", "Fyodor
+ * Dostoyevsky", "Fiódor Dostoiévski"). Only long names with the same initials
+ * that differ by at most a fifth count, so co-authors are never merged.
+ */
+export function isSameAuthorSpelling(a: string, b: string): boolean {
+  const x = comparableName(a);
+  const y = comparableName(b);
+  if (!x || !y) return a === b;
+  if (x === y) return true;
+  const wx = x.split(" ");
+  const wy = y.split(" ");
+  if (wx.length < 2 || wy.length < 2) return false;
+  if (wx[0][0] !== wy[0][0]) return false;
+  if (wx[wx.length - 1][0] !== wy[wy.length - 1][0]) return false;
+  const longest = Math.max(x.length, y.length);
+  if (longest < 10) return false;
+  return editDistance(x, y) <= Math.floor(longest * 0.2);
+}
+
+/** The JSON in a Goodreads page's `__NEXT_DATA__` script, or "" without one. */
+export function extractNextDataJson(html: string): string {
+  const match =
+    /<script[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i.exec(
+      html || "",
+    );
+  return match ? match[1] : "";
+}
+
+/**
+ * The ASIN of the edition itself. Goodreads now puts the Kindle edition's ASIN
+ * on printed editions too ("B0DN8P5BQF" on The Hobbit's Houghton Mifflin
+ * paperback); a printed book's own ASIN is its ISBN-10, so a Kindle ASIN on a
+ * paperback or hardcover is left out.
+ */
+export function printedBookAsin(asin: string, format: string): string {
+  const printed = [
+    "paperback",
+    "hardcover",
+    "library binding",
+    "leather",
+    "board book",
+  ].includes(formatFamily(format));
+  return printed && /^B0[0-9A-Z]{8}$/i.test(asin) ? "" : asin;
+}
+
+/** The Goodreads id of the work a book page belongs to, from its page data. */
+export function goodreadsWorkId(nextDataJson: string): string {
+  try {
+    const state = getPath(JSON.parse(nextDataJson || "{}"), [
+      "props",
+      "pageProps",
+      "apolloState",
+    ]);
+    const root = getProp(state, "ROOT_QUERY");
+    const bookKey = isRecord(root)
+      ? Object.keys(root).find((key) => key.startsWith("getBookByLegacyId"))
+      : undefined;
+    const book = getProp(
+      state,
+      getString(getPath(root, [bookKey || "", "__ref"])),
+    );
+    const work = getProp(state, getString(getPath(book, ["work", "__ref"])));
+    const id = getProp(work, "legacyId");
+    return typeof id === "number" || typeof id === "string" ? String(id) : "";
+  } catch {
+    return "";
+  }
+}
+
+// Goodreads' codes for filtering a work's editions by language.
+const EDITION_LANGUAGE_FILTERS: Record<string, string> = {
+  english: "eng",
+  spanish: "spa",
+  french: "fre",
+  german: "ger",
+  italian: "ita",
+  portuguese: "por",
+  catalan: "cat",
+  dutch: "dut",
+  japanese: "jpn",
+  russian: "rus",
+  polish: "pol",
+  swedish: "swe",
+};
+
+/**
+ * The editions listed on a work's editions page
+ * (goodreads.com/work/editions/…): title, binding, publisher, date, pages,
+ * ISBNs and language of each. Pure: reads the page's HTML.
+ */
+export function parseGoodreadsEditionsPage(html: string): Book[] {
+  return (html || "")
+    .split('<div class="elementList')
+    .slice(1)
+    .map((block) => {
+      const read = (pattern: RegExp): string => {
+        const match = pattern.exec(block);
+        return match ? htmlToText(match[1]).replace(/\s+/g, " ").trim() : "";
+      };
+      const heading = read(/<a class="bookTitle"[^>]*>([\s\S]*?)<\/a>/);
+      const binding = /\(([^()]+)\)\s*$/.exec(heading)?.[1] || "";
+      const published = read(
+        /<div class="dataRow">\s*Published\b([\s\S]*?)<\/div>/,
+      );
+      const [, date = "", publisher = ""] =
+        /^(.*?)(?:\s*\bby\s+(.*))?$/.exec(published) || [];
+      const summary = block.split("moreDetails")[0];
+      const pages = /(\d+)\s+pages/.exec(summary)?.[1] || "";
+      const isbn = read(
+        /ISBN:\s*<\/div>\s*<div class="dataValue">\s*([\dX]{10,13})/,
+      );
+      const isbn10 = read(/\(ISBN10:\s*([\dX]{10})\)/);
+      return {
+        title: heading.replace(/\s*\([^()]+\)\s*$/, ""),
+        author: "",
+        authors: [],
+        coverUrl: "",
+        link: "",
+        format: binding,
+        publisher: publisher.trim(),
+        publishDate: parseBookDate(date),
+        totalPage: pages,
+        isbn13: isbn.length === 13 ? isbn : "",
+        isbn10: isbn10 || (isbn.length === 10 ? isbn : ""),
+        language: read(
+          /Edition language:\s*<\/div>\s*<div class="dataValue">\s*([^<]+)</,
+        ),
+        sourceProvider: "goodreads",
+      };
+    });
+}
+
+export function normalizeGoodreadsCover(url: string): string {
+  return (url || "")
+    .replace(/_SY\d+_/, "_SY475_")
+    .replace(/_SX\d+_/, "_SX475_");
+}
+
+/** A Goodreads timestamp (milliseconds) as yyyy/mm/dd, or "". */
+function formatEpochDate(value: unknown): string {
+  const ms = getNumber(value);
+  if (!ms) return "";
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}/${month}/${day}`;
+}
+
+function cleanName(value: unknown): string {
+  return getString(value).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Every field Goodreads has for the edition on a book page, read from the
+ * page's Apollo state (the data the page itself is rendered from). Needs no
+ * DOM, so a page is parsed without building one, and it is tested directly.
+ * Returns null when the page has no book in its Apollo state.
+ */
+export function parseGoodreadsApollo(
+  nextDataJson: string,
+  link: string,
+): Book | null {
+  let nextData: unknown;
+  try {
+    nextData = JSON.parse(nextDataJson);
+  } catch {
+    return null;
+  }
+  const state = getPath(nextData, ["props", "pageProps", "apolloState"]);
+  const root = getProp(state, "ROOT_QUERY");
+  if (!isRecord(state) || !isRecord(root)) return null;
+
+  const legacyId = /\/book\/show\/(\d+)/.exec(link || "")?.[1] || "";
+  const explicitKey = legacyId
+    ? `getBookByLegacyId({"legacyId":"${legacyId}"})`
+    : "";
+  const refKey =
+    explicitKey && isRecord(root[explicitKey])
+      ? explicitKey
+      : Object.keys(root).find((k) => k.startsWith("getBookByLegacyId(")) || "";
+  const bookRef = refKey ? getString(getPath(root, [refKey, "__ref"])) : "";
+  const book = bookRef ? state[bookRef] : undefined;
+  if (!isRecord(book)) return null;
+
+  const details = getProp(book, "details");
+  const workRef = getString(getPath(book, ["work", "__ref"]));
+  const workDetails = workRef ? getProp(state[workRef], "details") : undefined;
+
+  // Contributors, by what their role means for a note.
+  const authors: string[] = [];
+  const translators: string[] = [];
+  const narrators: string[] = [];
+  let primaryName = "";
+  const edges = [
+    getProp(book, "primaryContributorEdge"),
+    ...getArray(getProp(book, "secondaryContributorEdges")),
+  ];
+  edges.forEach((edge, index) => {
+    const nodeRef = getString(getPath(edge, ["node", "__ref"]));
+    const name = nodeRef ? cleanName(getProp(state[nodeRef], "name")) : "";
+    if (!name || name.toLowerCase() === "unknown author") return;
+    if (index === 0) primaryName = name;
+    const kind = contributorKind(getString(getProp(edge, "role")));
+    if (kind === "author") {
+      if (!authors.some((known) => isSameAuthorSpelling(known, name))) {
+        authors.push(name);
+      }
+      return;
+    }
+    const list =
+      kind === "translator"
+        ? translators
+        : kind === "narrator"
+          ? narrators
+          : null;
+    if (list && !list.includes(name)) list.push(name);
+  });
+  // An anthology's primary contributor can be its editor: never leave a book
+  // without an author when Goodreads names someone first.
+  if (
+    !authors.length &&
+    primaryName &&
+    !translators.includes(primaryName) &&
+    !narrators.includes(primaryName)
+  ) {
+    authors.push(primaryName);
+  }
+
+  const genres: string[] = [];
+  for (const item of getArray(getProp(book, "bookGenres"))) {
+    const name = cleanName(getPath(item, ["genre", "name"]));
+    if (name && !genres.includes(name)) genres.push(name);
+  }
+
+  const isbnRaw = digitsOnly(getProp(details, "isbn"));
+  const isbn13Raw = digitsOnly(getProp(details, "isbn13"));
+  const isbn10 =
+    isbnRaw.length === 10 ? isbnRaw : isbn13Raw.length === 10 ? isbn13Raw : "";
+  const isbn13 =
+    isbn13Raw.length === 13 ? isbn13Raw : isbnRaw.length === 13 ? isbnRaw : "";
+  // Amazon's ASIN for a printed book is its ISBN-10, and Goodreads sometimes
+  // has only that: The Shadow of the Wind (Penguin) has no ISBN and the ASIN
+  // 0143034901. Without it a global search borrowed another edition's ISBN.
+  const asin = cleanName(getProp(details, "asin")).toUpperCase();
+  const asinIsbn10 =
+    isIsbn10(asin) &&
+    (!isbn10 || isbn10 === asin) &&
+    (!isbn13 || isbn13 === toIsbn13(asin))
+      ? asin
+      : "";
+  const numPages = getNumber(getProp(details, "numPages"));
+  const names = (items: unknown, separator: string): string =>
+    getArray(items)
+      .map((item) => cleanName(getProp(item, "name")))
+      .filter((name, i, all) => name && all.indexOf(name) === i)
+      .join(separator);
+  const coverUrl = normalizeGoodreadsCover(
+    getString(getProp(book, "imageUrl")),
+  );
+
+  return {
+    title: cleanName(getProp(book, "title")),
+    subtitle: "",
+    author: authors[0] || "",
+    authors,
+    translator: translators.join(", "),
+    narrator: narrators.join(", "),
+    category: genres.join(", "),
+    categories: genres.join(", "),
+    description: cleanGoodreadsDescription(
+      getString(getProp(book, "description")) ||
+        getString(getProp(book, 'description({"stripped":true})')),
+    ),
+    publisher: cleanName(getProp(details, "publisher")),
+    publishDate: formatEpochDate(getProp(details, "publicationTime")),
+    totalPage: numPages ? String(numPages) : "",
+    isbn10: isbn10 || asinIsbn10,
+    isbn13: isbn13 || (asinIsbn10 ? toIsbn13(asinIsbn10) : ""),
+    asin: printedBookAsin(
+      cleanName(getProp(details, "asin")),
+      cleanName(getProp(details, "format")),
+    ),
+    format: cleanName(getProp(details, "format")),
+    // "Spanish; Castilian" is Goodreads' name for Spanish.
+    language: cleanName(getPath(details, ["language", "name"]))
+      .split(";")[0]
+      .trim(),
+    originalTitle: cleanName(getProp(workDetails, "originalTitle")),
+    firstPublishDate: formatEpochDate(getProp(workDetails, "publicationTime")),
+    // Place names carry their own commas ("London, England").
+    places: names(getProp(workDetails, "places"), "; "),
+    characters: names(getProp(workDetails, "characters"), ", "),
+    coverUrl,
+    coverSmallUrl: coverUrl,
+    link,
+    previewLink: link,
+    ...extractApolloSeries(state, book),
+  };
+}
+
 // Remembers which Tier-1 route last worked, across GoodreadsApi instances
 // (the factory creates a fresh instance per call). Avoids re-probing blocked
 // routes on every fetch.
@@ -316,6 +706,9 @@ export class GoodreadsApi implements BaseBooksApiImpl {
 
   // Status of the last direct-route fetch, for the fallback diagnostic Notice.
   private lastDetailStatus?: number;
+
+  // The work of the book page parsed last, for finding its editions.
+  private lastWorkId = "";
 
   private readonly userAgent =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
@@ -332,23 +725,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
   }
 
   private normalizeCoverUrl(url: string): string {
-    return (url || "")
-      .replace(/_SY\d+_/, "_SY475_")
-      .replace(/_SX\d+_/, "_SX475_");
-  }
-
-  private stripHtml(html: string): string {
-    return (html || "")
-      .replace(/<br\s*\/?>/gi, " ")
-      .replace(/<[^>]*>/g, "")
-      .replace(/&amp;/g, "&")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;|&apos;/g, "'")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&nbsp;/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    return normalizeGoodreadsCover(url);
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
@@ -373,174 +750,9 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     return undefined;
   }
 
-  private extractDigits(value: unknown): string {
-    return this.asString(value).replace(/[^0-9X]/gi, "");
-  }
-
   private extractGoodreadsLegacyId(link: string): string {
     const match = (link || "").match(/\/book\/show\/(\d+)/);
     return match?.[1] || "";
-  }
-
-  private formatDateFromEpochMs(value: unknown): string {
-    const n = this.asNumber(value);
-    if (!n) return "";
-    const date = new Date(n);
-    if (Number.isNaN(date.getTime())) return "";
-    const day = String(date.getDate()).padStart(2, "0");
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const year = date.getFullYear();
-    return `${year}/${month}/${day}`;
-  }
-
-  private tryExtractApolloBookData(
-    doc: Document,
-    link: string,
-  ): Partial<Book> & { _authors?: string[]; _translators?: string[] } {
-    const nextDataRaw = doc.querySelector("#__NEXT_DATA__")?.textContent || "";
-    if (!nextDataRaw) return {};
-
-    let nextData: unknown;
-    try {
-      nextData = JSON.parse(nextDataRaw);
-    } catch {
-      return {};
-    }
-
-    const apolloState = this.getPath(nextData, [
-      "props",
-      "pageProps",
-      "apolloState",
-    ]);
-    if (!this.isRecord(apolloState)) return {};
-
-    const rootQuery = apolloState["ROOT_QUERY"];
-    if (!this.isRecord(rootQuery)) return {};
-
-    const legacyId = this.extractGoodreadsLegacyId(link);
-    const explicitKey = legacyId
-      ? `getBookByLegacyId({"legacyId":"${legacyId}"})`
-      : "";
-    const refKey =
-      (explicitKey && this.isRecord(rootQuery[explicitKey])
-        ? explicitKey
-        : Object.keys(rootQuery).find((k) =>
-            k.startsWith("getBookByLegacyId("),
-          )) || "";
-    if (!refKey) return {};
-
-    const ref = rootQuery[refKey];
-    const bookRef = this.asString(this.getPath(ref, ["__ref"]));
-    if (!bookRef || !this.isRecord(apolloState[bookRef])) return {};
-
-    const bookJson = apolloState[bookRef] as Record<string, unknown>;
-    const details: Record<string, unknown> = this.isRecord(bookJson["details"])
-      ? bookJson["details"]
-      : {};
-
-    // Contributors (role-aware): prefer real Authors over Translators/Editors/etc.
-    const authors: string[] = [];
-    const translators: string[] = [];
-
-    const pushContributor = (roleRaw: unknown, nodeRefRaw: unknown) => {
-      const role = this.asString(roleRaw);
-      const nodeRef = this.asString(nodeRefRaw);
-      if (!role || !nodeRef || !this.isRecord(apolloState[nodeRef])) return;
-      const name = this.asString(this.getPath(apolloState[nodeRef], ["name"]));
-      if (!name || name.toLowerCase() === "unknown author") return;
-
-      const normalizedRole = role.toLowerCase();
-      if (normalizedRole === "translator") {
-        if (!translators.includes(name)) translators.push(name);
-        return;
-      }
-      if (normalizedRole === "author" || normalizedRole === "pseudonym") {
-        if (!authors.includes(name)) authors.push(name);
-      }
-    };
-
-    const primary = bookJson["primaryContributorEdge"];
-    if (this.isRecord(primary)) {
-      pushContributor(
-        primary["role"],
-        this.getPath(primary, ["node", "__ref"]),
-      );
-    }
-
-    const secondary = bookJson["secondaryContributorEdges"];
-    if (Array.isArray(secondary)) {
-      for (const edge of secondary) {
-        if (!this.isRecord(edge)) continue;
-        pushContributor(edge["role"], this.getPath(edge, ["node", "__ref"]));
-      }
-    }
-
-    // Genres from apolloState (more robust than UI-only "Top genres")
-    const genreNames: string[] = [];
-    const genresRaw = bookJson["bookGenres"];
-    if (Array.isArray(genresRaw)) {
-      for (const item of genresRaw) {
-        if (!this.isRecord(item)) continue;
-        const name = this.asString(this.getPath(item, ["genre", "name"]));
-        if (name && !genreNames.includes(name)) genreNames.push(name);
-      }
-    }
-
-    // Identifiers
-    const isbnRaw = this.extractDigits(details["isbn"]);
-    const isbn13Raw = this.extractDigits(details["isbn13"]);
-    const asin = this.asString(details["asin"]);
-    const numPages = this.asNumber(details["numPages"]);
-    const publisher = this.asString(details["publisher"]);
-    const publishDate = this.formatDateFromEpochMs(details["publicationTime"]);
-
-    const isbn10 =
-      isbnRaw.length === 10
-        ? isbnRaw
-        : isbn13Raw.length === 10
-          ? isbn13Raw
-          : "";
-    const isbn13 =
-      isbn13Raw.length === 13
-        ? isbn13Raw
-        : isbnRaw.length === 13
-          ? isbnRaw
-          : "";
-
-    // Cover
-    const coverUrl = this.normalizeCoverUrl(
-      this.asString(bookJson["imageUrl"]),
-    );
-
-    // Work details (original title)
-    let originalTitle = "";
-    const workRef = this.asString(this.getPath(bookJson, ["work", "__ref"]));
-    if (workRef && this.isRecord(apolloState[workRef])) {
-      originalTitle = this.asString(
-        this.getPath(apolloState[workRef], ["details", "originalTitle"]),
-      );
-    }
-
-    const partial: Partial<Book> & {
-      _authors?: string[];
-      _translators?: string[];
-    } = {
-      publisher,
-      publishDate,
-      totalPage: numPages ? String(numPages) : "",
-      categories: genreNames.join(", "),
-      category: genreNames.join(", "),
-      isbn10,
-      isbn13,
-      asin,
-      coverUrl,
-      originalTitle,
-      ...extractApolloSeries(apolloState, bookJson),
-      _authors: authors,
-      _translators: translators,
-    };
-
-    return partial;
   }
 
   async getByQuery(query: string): Promise<Book[]> {
@@ -810,7 +1022,7 @@ export class GoodreadsApi implements BaseBooksApiImpl {
         const descriptionHtml =
           this.asString(this.getPath(obj, ["description", "html"])) ||
           this.asString(obj.description);
-        const description = this.stripHtml(descriptionHtml).replace(/"/g, "'");
+        const description = cleanGoodreadsDescription(descriptionHtml);
 
         books.push({
           title,
@@ -871,8 +1083,21 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     this.lastDetailStatus = undefined;
 
     // Tiers 1–4: get a parsed detail page from Goodreads or an archive.
+    this.lastWorkId = "";
     const detail = await this.fetchDetail(book);
     let result = detail ? mergeBookData(book, detail) : { ...book };
+
+    // Goodreads keeps some editions without an ISBN, while its list of the
+    // work's editions has a twin that carries one: the same publisher, pages,
+    // binding and language (Norwegian Wood, Vintage Books, 296 pages:
+    // 9780375704024). Only a single such twin is taken.
+    if (detail && !result.isbn13 && !result.isbn10 && this.lastWorkId) {
+      const twin = await this.findTwin(result, this.lastWorkId);
+      if (twin) {
+        result.isbn13 = toIsbn13(twin.isbn13 || twin.isbn10 || "");
+        result.isbn10 = twin.isbn10 || toIsbn10(result.isbn13);
+      }
+    }
 
     // A single-service search returns ONLY Goodreads data. Cross-source
     // enrichment from other providers (Google Books / OpenLibrary) is the job
@@ -980,10 +1205,42 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     }
   }
 
+  /** The one edition in the work's editions list that is this edition and has an ISBN. */
+  private async findTwin(book: Book, workId: string): Promise<Book | null> {
+    const params = new URLSearchParams({ per_page: "100" });
+    if (book.format) params.set("filter_by_format", book.format);
+    const language =
+      EDITION_LANGUAGE_FILTERS[(book.language || "").toLowerCase()];
+    if (language) params.set("filter_by_language", language);
+    try {
+      const res = await httpRequest(
+        {
+          url: `${GOODREADS_HOST}/work/editions/${workId}?${params.toString()}`,
+          method: "GET",
+          headers: { "User-Agent": this.userAgent },
+        },
+        { providerId: "goodreads", purpose: "editions", cacheTtlMs: 600_000 },
+      );
+      if (res.status !== 200 || looksLikeBotChallenge(res.status, res.text)) {
+        return null;
+      }
+      return pickSameEdition(book, parseGoodreadsEditionsPage(res.text));
+    } catch (error) {
+      console.warn("Goodreads editions lookup failed", error);
+      return null;
+    }
+  }
+
   /** Tier 4: layered parse — apolloState/DOM, then JSON-LD, then OpenGraph. */
   private parseDetailHtml(html: string, link: string): Book {
-    const doc = this.parseHtml(html);
-    let parsed = this.extractBook(doc, link);
+    // The page's own data first; a DOM is only built for pages without it.
+    const nextData = extractNextDataJson(html);
+    this.lastWorkId = goodreadsWorkId(nextData);
+    const apollo = parseGoodreadsApollo(nextData, link);
+    let parsed =
+      apollo && apollo.title
+        ? apollo
+        : this.extractBook(this.parseHtml(html), link);
     // Structure-independent layers fill any gaps the primary parse left.
     parsed = mergeBookData(parseLdJsonBook(html), parsed);
     parsed = mergeBookData(parseOgMetaBook(html), parsed);
@@ -1096,135 +1353,114 @@ export class GoodreadsApi implements BaseBooksApiImpl {
     }
   }
 
+  /**
+   * The DOM fallback for pages whose Apollo state is missing or carries no
+   * title (older or archived pages). Whatever Apollo data there is still wins
+   * over what the markup shows.
+   */
   private extractBook(doc: Document, link: string): Book {
-    // 1. Título
     const title =
       this.text(doc.querySelector('h1[data-testid="bookTitle"]')) ||
-      this.text(doc.querySelector("#bookTitle")).replace(/"/g, "'");
+      this.text(doc.querySelector("#bookTitle"));
 
-    // 3. Resumen
-    const description = this.text(doc.querySelector("span.Formatted")).replace(
-      /"/g,
-      "'",
+    const descriptionEl =
+      doc.querySelector('[data-testid="description"] span.Formatted') ||
+      doc.querySelector("span.Formatted");
+    const description = cleanGoodreadsDescription(
+      descriptionEl?.innerHTML || "",
     );
 
-    // 2/4/6. Structured extraction from __NEXT_DATA__ (role-aware + stable)
-    const apollo = this.tryExtractApolloBookData(doc, link);
-
-    // 2. Autor (a) + Traductor (a)
-    const authors: string[] = [...(apollo._authors || [])];
-    const translator = (apollo._translators || []).join(", ");
-
-    if (authors.length === 0) {
-      // Fallback for older pages / missing apolloState
-      doc
-        .querySelectorAll('.ContributorLink__name[data-testid="name"]')
-        .forEach((el) => {
-          const a = this.text(el);
-          if (a) authors.push(a);
-        });
-      if (authors.length === 0) {
-        doc.querySelectorAll("a.authorName").forEach((el) => {
-          const a = this.text(el);
-          if (a) authors.push(a);
-        });
+    // Contributors with their roles: "(Translator)" next to a name.
+    const authors: string[] = [];
+    const translators: string[] = [];
+    const narrators: string[] = [];
+    const addContributor = (name: string, role: string) => {
+      const clean = name.replace(/\s+/g, " ").trim();
+      if (!clean) return;
+      const kind = contributorKind(role.replace(/[()]/g, ""));
+      if (kind === "author") {
+        if (!authors.some((known) => isSameAuthorSpelling(known, clean))) {
+          authors.push(clean);
+        }
+        return;
       }
-    }
-    const authorString = authors[0] || "";
-
-    // 4. Género
-    let category = apollo.categories || apollo.category || "";
-    if (!category) {
-      const categories: string[] = [];
-      doc
-        .querySelectorAll(
-          'ul[aria-label="Top genres for this book"] a.Button--tag',
-        )
-        .forEach((el) => {
-          const c = this.text(el);
-          if (c) categories.push(c);
-        });
-      category = categories.join(", ");
-    }
-
-    // 5. ASIN (User selector: {{selector:span[data-testid="asin"]|first|trim}})
-    const asin =
-      apollo.asin || this.text(doc.querySelector('span[data-testid="asin"]'));
-
-    const originalTitle = apollo.originalTitle || "";
-    const publisher = apollo.publisher || "";
-    const isbn10 = apollo.isbn10 || "";
-    const isbn13 = apollo.isbn13 || "";
-    const publishDate = apollo.publishDate || "";
-
-    // Pages
-    let totalPage =
-      typeof apollo.totalPage === "number"
-        ? String(apollo.totalPage)
-        : apollo.totalPage || "";
-    if (!totalPage) {
-      doc
-        .querySelectorAll('script[type="application/ld+json"]')
-        .forEach((el) => {
-          try {
-            const data = JSON.parse(el.textContent || "{}") as {
-              ["@type"]?: unknown;
-              isbn?: unknown;
-              numberOfPages?: unknown;
-              image?: unknown;
-            };
-            if (
-              data["@type"] === "Book" &&
-              (typeof data.numberOfPages === "number" ||
-                typeof data.numberOfPages === "string")
-            ) {
-              totalPage = String(data.numberOfPages);
-            }
-          } catch {
-            // ignore schema parse errors
-          }
-        });
-      if (!totalPage) {
-        const pagesText = this.text(
-          doc.querySelector('p[data-testid="pagesFormat"]'),
+      const list =
+        kind === "translator"
+          ? translators
+          : kind === "narrator"
+            ? narrators
+            : null;
+      if (list && !list.includes(clean)) list.push(clean);
+    };
+    doc.querySelectorAll(".ContributorLink").forEach((el) => {
+      addContributor(
+        this.text(el.querySelector(".ContributorLink__name")),
+        this.text(el.querySelector(".ContributorLink__role")),
+      );
+    });
+    if (!authors.length) {
+      doc.querySelectorAll(".authorName__container").forEach((el) => {
+        addContributor(
+          this.text(el.querySelector(".authorName")),
+          this.text(el.querySelector(".role")),
         );
-        if (pagesText) totalPage = pagesText.split(" ")[0];
-      }
+      });
     }
 
-    // Cover Image
-    let coverUrl = apollo.coverUrl || "";
-    if (!coverUrl) {
-      coverUrl =
-        doc.querySelector("img.ResponsiveImage")?.getAttribute("src") ||
+    const categories: string[] = [];
+    doc
+      .querySelectorAll(
+        'ul[aria-label="Top genres for this book"] a.Button--tag',
+      )
+      .forEach((el) => {
+        const c = this.text(el);
+        if (c && !categories.includes(c)) categories.push(c);
+      });
+    const category = categories.join(", ");
+
+    const asin = this.text(doc.querySelector('span[data-testid="asin"]'));
+
+    // Only a real page count: an audiobook's line reads "Audible Audio".
+    const pagesMatch = /(\d[\d,.]*)\s*pages?/i.exec(
+      this.text(doc.querySelector('p[data-testid="pagesFormat"]')),
+    );
+    const totalPage = pagesMatch ? pagesMatch[1].replace(/[,.]/g, "") : "";
+
+    const coverUrl = this.normalizeCoverUrl(
+      doc.querySelector("img.ResponsiveImage")?.getAttribute("src") ||
         doc.querySelector("#coverImage")?.getAttribute("src") ||
-        "";
-      coverUrl = this.normalizeCoverUrl(coverUrl);
-    }
+        "",
+    );
 
-    return {
+    const fromMarkup: Book = {
       title,
       subtitle: "",
-      author: authorString,
-      authors: authors.length ? authors : [authorString],
+      author: authors[0] || "",
+      authors,
+      translator: translators.join(", "),
+      narrator: narrators.join(", "),
       category,
       categories: category,
-      publisher,
-      publishDate,
+      publisher: "",
+      publishDate: "",
       totalPage,
       coverUrl,
       coverSmallUrl: coverUrl,
       description,
       link,
       previewLink: link,
-      isbn10,
-      isbn13,
-      originalTitle,
-      translator,
-      narrator: "",
+      isbn10: "",
+      isbn13: "",
+      originalTitle: "",
       asin,
-      series: apollo.series || "",
-      seriesNumber: apollo.seriesNumber || "",
+      series: "",
+      seriesNumber: "",
     };
+
+    const apollo = parseGoodreadsApollo(
+      doc.querySelector("#__NEXT_DATA__")?.textContent || "",
+      link,
+    );
+    return apollo ? mergeBookData(fromMarkup, apollo) : fromMarkup;
   }
 }
